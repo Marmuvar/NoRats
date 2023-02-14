@@ -1,0 +1,789 @@
+---
+title: "CART Model"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+# Set Up
+
+## Libraries
+
+```{r echo=FALSE}
+# Basic packages
+#library(plyr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(tictoc)
+
+# Packages for mapping
+library(sp)
+library(sf)
+library(raster)
+library(leaflet)
+
+# Formatting and Visualizations
+library(viridis)          # Need for viridis color palette in word cloud
+library(knitr)            # Need to manage text outputs in RMarkdown
+library(formatR)          # To manage margins
+
+```
+
+## Importing Data
+
+```{r, Importing-the-Data}
+data_cols <- cols(
+     `Inspection ID` = col_double(),
+     `DBA Name` = col_character(),
+     `AKA Name` = col_character(),
+     `License #` = col_double(),
+     `Facility Type` = col_character(),
+     Risk = col_factor(),
+     Address = col_character(),
+     City = col_character(),
+     State = col_character(),
+     Zip = col_double(),
+     `Inspection Date` = col_datetime(format = ""),
+     `Inspection Type` = col_character(),
+     Results = col_character(),
+     Violations = col_character(),
+     Latitude = col_double(),
+     Longitude = col_double(),
+     Location = col_character()
+)
+raw.data <- read_csv("food-inspections.csv", col_types = data_cols)
+```
+
+## Communities
+
+Chicago has community Areas and Neighborhoods. community areas have demographic data associated with them, but do not necessarily form homogeneous regions.
+
+Shape files from [here](https://data.cityofchicago.org/Facilities-Geographic-Boundaries/Boundaries-Neighborhoods/bbvz-uum9).
+
+```{r Importing-Maps}
+nbhd <- read_sf("ChicagoNbhd/geo_export_8956960c-bd3c-4e92-a8b2-4748382c28a3.shp")  %>%
+     sf::st_transform('+proj=longlat +datum=WGS84')
+
+communities <- read_sf("ChicagoCommunities/geo_export_55b54106-a17e-4776-86c9-12db49043238.shp")  %>%
+     sf::st_transform('+proj=longlat +datum=WGS84')
+```
+
+This creates a new df which has a GIS geometry column in place of Latitude and Longitude.
+
+```{r Mapping-Inspections}
+inspections <- raw.data  %>%
+     filter(! (is.na(Latitude) | is.na(Longitude)))  %>%
+     add_column(community = NA_character_, .after = "Address")  %>%
+     rowid_to_column  %>%
+     st_as_sf(
+          coords = c("Longitude", "Latitude"), 
+          crs= crs(nbhd))
+```
+
+## Demographics
+
+The following is a table of demographic area based on community Area
+For working with demographic fields, added a second table that has demographic information preceded by "POP_".  Master demographic table looks for a prefix
+
+```{r}
+demographic_names <- c(
+     'Layer', 'Name', 'GEOID', 'Population', 'Longitude', 'Latitude', 'Male',
+     'Female', 'White', 'Black', 'Asian', 'Hispanic', 'Native', 'TwoOrMore',
+     'Infant', 'Senior', 'Adult', 'MiddleAge', 'Young', 'Children','Juvenile'
+)
+
+demographics_columns <- cols(
+     Layer = col_character(),
+     Name = col_character(),
+     GEOID = col_character(),
+     Population = col_double(),
+     Longitude = col_character(),
+     Latitude = col_character(),
+     `Male` = col_double(),
+     `Female` = col_double(),
+     `White` = col_double(),
+     `Black` = col_double(),
+     `Asian` = col_double(),
+     `Hispanic` = col_double(),
+     `Native` = col_double(),
+     `TwoOrMore` = col_double(),
+     `Infant` = col_double(),
+     `Senior` = col_double(),
+     `Adult` = col_double(),
+     `MiddleAge` = col_double(),
+     `Young` = col_double(),
+     `Children` = col_double(),
+     `Juvenile` = col_double()
+)
+
+demographics.info <- read_csv("Demographics/CHADDemographics.csv", 
+                              col_names = demographic_names, 
+                              skip = 1, 
+                              n_max = 2,
+                              show_col_types = FALSE) %>%
+     dplyr::select('Male':'Juvenile')
+
+demographics <- read_csv("Demographics/CHADDemographics.csv",
+                         col_names = demographic_names, 
+                         col_types = demographics_columns,
+                         skip = 5
+)
+
+# Renaming variables to ensure consistency across program paradigms.
+demographic.columns.fixed <- str_c(rep("POPCT_", 15), str_to_upper(demographic_names[7:21])) %>%
+     append(demographic_names[1:6], after=0)
+
+demographics <- demographics %>%
+     setNames(demographic.columns.fixed) %>%
+     mutate(Name = str_to_upper(Name))%>%
+     as_tibble()
+
+```
+
+The table `demographicInfo` provides a description of the columns of `demographics`
+
+Here, the `communities` and `demographics` dataframe are merged to create a `communities.demographics` dataframe.
+
+```{r}
+communities <- communities  %>%
+     mutate(community = replace(community, community == "OHARE", "O'HARE"))
+
+demographics <- demographics  %>%
+     mutate(commID = str_to_upper(Name))
+
+communities.demographics <- merge(communities, 
+                                  demographics, 
+                                  by.x = "community", 
+                                  by.y = "commID")
+```
+
+
+```{r other_demographics, eval=TRUE, include=TRUE}
+demo.traf.vac <- read.csv("Demographics/Chicago_traffic_and_Vacant.csv") %>%
+     mutate(Name=str_to_upper(Name))
+
+demo.income <- read.csv("Demographics/Chicago_income.csv") %>% 
+     mutate(Name=str_to_upper(Name))
+
+demo.lang.birth <- read.csv("Demographics/Chicago_lang_and_birth.csv") %>%
+     mutate(Name=str_to_upper(Name))
+
+demo.population <- read.csv("Demographics/Chicago_pop.csv") %>% 
+     mutate(Name=str_to_upper(Name))
+```
+
+# Cleaning Data
+
+## Labeling Violations with community
+
+We look for the intersections of `communities` and `inspection` and create `vio.comm.int`, which is a sparse matrix. For a community Area described in row `i` of `communities` there is a row in `vio.comm.int` which lists the rows `j` in `inspections` which fall within its boundary.
+
+```{r Intersecting-Inspections-Communities}
+tic("Running st_intersects")
+vio.comm.int <- st_intersects(communities, inspections)
+toc()
+```
+
+Now, we revise `inspections` to include a column listing the community Area the location falls within.
+
+```{r Label Inspection by Community Area}
+tic("Label Inspections by Community Area")
+inspections <- inspections  %>% as_tibble()
+for (i in 1:nrow(communities)) {
+     inspections <- inspections %>%
+          rows_update(
+               tibble(
+                    rowid = unlist(vio.comm.int[[i]]), 
+                    community = communities$community[i]
+               ),
+               by = "rowid"
+          )
+}
+inspections <- inspections  %>% st_as_sf()
+toc()
+```
+
+## Risk
+Update the risk category to Low / Medium / High
+```{r}
+inspections <- inspections  %>%
+     mutate(
+          Risk = fct_recode(inspections$Risk,
+                            Low = "Risk 3 (Low)", 
+                            Medium = "Risk 2 (Medium)", 
+                            High = "Risk 1 (High)")) 
+```
+
+## Facility Type
+
+```{r}
+#For consistency, first convert facilities to lowercase.
+#Then, limit to inspection dates before paradigm changed.
+#Look for any odd cases where a facility contains restaurant in name or is misspelled.  
+inspections <- inspections  %>%
+     mutate(`Facility Type` = str_to_lower(`Facility Type`)) %>%   
+     dplyr::filter(`Inspection Date`<"2018-07-01", 
+                   `Facility Type`=="restaurant")
+```
+
+## Violation Field
+
+Collect subset of violations.  
+
+```{r}
+#pre: Inspection data is filtered to prior to 2018-07-01
+#pre: Inspection is filtered to facility == restaurant.  
+tic("Splitting Violations")
+
+inspections <- inspections  %>% 
+     mutate(
+          `Violations` = if_else(is.na(`Violations`), 
+                                 true =  "0. NO VIOLATION RECORDED - Comments: NO VIOLATION RECORDED", 
+                                 false = `Violations`),
+     )
+
+violations <- inspections  %>%
+     dplyr::select(c("Inspection ID", "Violations"))  %>%
+     separate_rows(Violations, sep="\\|")  %>%
+     separate(Violations, c("Violation", "Observation"), 
+              sep = "- Comments: ",
+              fill = "right") %>% # Fill makes empty comments without complaining
+     separate(Violation, c("V_Num", "V_Desc"), 
+              sep = "\\.\\s",
+              extra="merge" # Only split on the first . 
+     )
+violations <- violations %>%
+     mutate(
+          V_Num = str_replace_all(violations$V_Num,"\\s",""),
+          V_Desc = str_replace_all(V_Desc,"^\\s",""),
+          V_Desc = str_replace_all(V_Desc,"\\s$",""),
+          V_Num = as.integer(V_Num))
+toc()
+```
+
+## Remove Geometry
+
+Geometry is dropped from here on out to simplify issues.
+
+```{r data_reshape}
+#keep copy for calculation purposes
+inspections.geo<-inspections
+#drop geometry for simpicity of inspection.  
+violations <- st_drop_geometry(violations)
+inspections <- st_drop_geometry(inspections)
+
+#inspect_long is key combination for downstream calcs and figs
+inspect_long <- inspections %>%
+     dplyr::select(-c(Violations, Location))%>%
+     inner_join(violations, by = "Inspection ID")
+```
+
+```{r}
+canvass.inspection <- c("Canvass", "CANVASS", "CANVAS")
+complaint.inspection <- c("Complaint", "Short Form Complaint", "Suspected Food Poisoning")
+
+
+with.complaint <- inspections %>%
+     dplyr::filter(`Inspection Type` %in% complaint.inspection)%>%
+     dplyr::select(`License #`) %>%
+     unique() %>%
+     pull()
+
+no.complaints <- inspections %>%
+     dplyr::filter( !(`License #` %in% with.complaint)) %>%
+     dplyr::filter(`Inspection Type` %in% canvass.inspection) %>%
+     dplyr::select(`License #`) %>%
+     unique() %>%
+     pull()
+
+inspections <- inspections %>%
+     filter(
+          (`License #` %in% with.complaint) | (`License #` %in% no.complaints)
+     ) %>%
+     mutate(Has_for_Cause = case_when(
+          `License #` %in% with.complaint         ~ TRUE,
+          `License #` %in% no.complaints          ~ FALSE
+     ))
+
+enough.canvass <- inspections %>%
+     filter(`Inspection Type` %in% canvass.inspection) %>%
+     group_by(`License #`) %>%
+     summarise(NumberOfCanvass = n()) %>%
+     filter(NumberOfCanvass > 2) %>%
+     dplyr::select(`License #`) %>%
+     distinct() %>%
+     pull()
+
+
+pass.fail.inspections <- inspections %>%
+     filter(`License #` %in% enough.canvass,
+            `License #` != 0,
+            `Inspection Type` %in% c(canvass.inspection, complaint.inspection)) %>%
+     filter(Results %in% c("Pass", "Fail", "Pass w/ Conditions")) %>%
+     droplevels()
+
+pass.fail.inspections <- pass.fail.inspections %>%
+     mutate(Results = factor(Results, levels = c("Pass", "Pass w/ Conditions", "Fail")))
+
+```
+```{r demo_graphs, fig.width=12, fig.height=12}
+
+#function for lengthening demographic info and tidy map plots.
+
+#pre: data is defined tibble containing a community in Name and data in value
+#pre: community is defined and contains an SF geometry and community name in community
+#pre: demo_col is user_defined text string and is contained in data
+#post: outputs a ggplot map of region with fill based on data value.  
+
+
+demo_plot<-function(data, demo_col, mainTitle=""){
+     data%>%
+          dplyr::select(Name, starts_with(demo_col))%>%
+          pivot_longer( 
+               cols= starts_with(demo_col), 
+               names_to= "demo_year")%>%
+          inner_join(communities, by=c("Name"="community"))%>%
+          st_as_sf()%>%
+          ggplot()+
+          geom_sf(aes(fill=value, geometry=geometry))+
+          #facet_wrap(vars(demo_year))+
+          labs(title=mainTitle)+
+          scale_fill_viridis_c(option="C")
+}
+
+png("graphics/demo_pop.png", width=6.5, height=9, units="in", res=144)
+demo_plot(demo.population,"POP_2014", "Community Population, 2014-2018")
+png("graphics/PC_Income.png", width=6.5, height=9, units="in", res=144)
+demo_plot(demo.income, "PCI_2014", "Per Capita Income, 2014-2018")
+dev.off()
+
+```
+## Violations Per Inspection
+This creates a column for each Violation Type. For each inspection, there is a 1 for each violation reported.
+
+```{r}
+pass.fail.inspections <- pass.fail.inspections %>%
+     dplyr::select(`Inspection ID`, `License #`, `AKA Name`, `Facility Type`, 
+                   `Inspection Date`, `Inspection Type`, `Results`, `Violations`) %>%
+     mutate_at(vars(`Results`), factor)
+
+violation_count <- inspect_long %>% group_by(`Inspection ID`, V_Num) %>%
+     summarise(n = n()) %>%
+     mutate(V_Num = str_pad(V_Num, 2, pad = "0")) %>%
+     pivot_wider(names_from = V_Num,
+                 names_prefix = "Violation_",
+                 values_from = n,
+                 values_fill = 0)
+
+# Reorder the Columns in Violation Number Order
+violation_count <- violation_count %>%
+     dplyr::select(order(colnames(violation_count)))
+
+pass.fail.inspections.wide <- pass.fail.inspections %>%
+     left_join(violation_count, by = "Inspection ID")
+```
+
+#Stats
+```{r}
+total_inspections<-inspections%>%
+     mutate(year=year(`Inspection Date`))%>%
+     filter(year<2018)%>%
+     group_by(year)%>%
+     dplyr::summarize(insp.yr=n())%>%
+     dplyr::summarize(insp.yr=mean(insp.yr))
+
+yearly_inspections<-inspections%>%
+     mutate(year=year(`Inspection Date`))%>%
+     filter(year<2018)%>%
+     group_by(year)%>%
+     dplyr::select(year, Results)%>%
+     group_by(year, Results)%>%
+     dplyr::summarise(insp.res.ct=n())%>%
+     group_by(Results)%>%
+     dplyr::summarize(mean_types=mean(insp.res.ct))
+
+cmty_inspections<-inspections%>%
+     dplyr::select(community,`Inspection ID`)%>%
+     group_by(community)%>%
+     dplyr::summarise(insp.ct=n())
+
+total_violations<-inspect_long%>%
+     mutate(year=year(`Inspection Date`))%>%
+     filter(year<2018)%>%
+     group_by(year)%>%
+     dplyr::select(year, V_Num)%>%
+     group_by(year)%>%
+     dplyr::summarise(v.ct=n())%>%
+     dplyr::summarize(mean_types=mean(v.ct))
+
+violations_by_type<-inspect_long%>%
+     mutate(year=year(`Inspection Date`))%>%
+     filter(year<2018)%>%
+     dplyr::select(V_Num)%>%
+     group_by(V_Num)%>%
+     dplyr::summarise(v.ct=n())%>%
+     mutate(v_pct=round(v.ct/sum(v.ct)*100, 2))
+
+#Summaries violations per inspection per inspection type
+viol_by_insp_type<-inspect_long%>%
+     group_by(`Inspection Type`)%>%
+     dplyr::summarise(tot_viol=n())
+
+viol_per_inspect_aka <-
+     inspect_long %>%
+     dplyr::select(`Inspection ID`, `AKA Name`,`License #`,
+                   `Facility Type`, Risk, `Inspection Date`, V_Num) %>%
+     group_by(`License #`,`AKA Name`, `Inspection ID`,`Facility Type`,
+              `Inspection Date`, Risk) %>%
+     dplyr::summarise(n = n())
+
+viol_mean_per_aka <- viol_per_inspect_aka %>%
+     group_by(`License #`, `AKA Name`, `Facility Type`, Risk) %>%
+     dplyr::summarise(mean = mean(n), n_inspect = n())
+
+total_restaurants<-inspections%>%
+     mutate(year=year(`Inspection Date`))%>%
+     filter(year<2018)%>%
+     dplyr::select(`License #`, `AKA Name`)%>%
+     distinct()%>%
+     dplyr::summarize(rest_ct=n())
+
+
+```
+#Violation Description
+
+```{r Violation_Description, fig.width=18}
+
+#Key violation numbers from CART model
+V_int<-c(3, 18, 21, 24, 28)
+
+vio_pct_as_key.plot <- violations%>%
+     dplyr::select(V_Num)%>%
+     group_by(V_Num)%>%
+     summarize(n=n())%>%
+     mutate(n_pct=n/sum(n)*100) %>%
+     mutate(keyViolation = as.logical(V_Num %in% V_int)) %>%
+     ggplot()+
+     geom_col(aes(y=as.factor(V_Num), 
+                  x=n_pct, 
+                  fill=keyViolation))+
+     #scale_fill_manual(values = palette.colors(palette="ggplot2")[c(2,4)])+
+     scale_fill_manual(values=plasma(n=2, begin =0.2, end=0.8))+
+     labs(title="Percentage of Violations Observed in Businesses",
+          subtitle="Usage in Classification Model Highlighted", 
+          fill="Key Violation", 
+          y="violation number", 
+          x="Percent Observed")
+vio_pct_as_key.plot
+
+png("graphics/viol_pct_as_key.png", width=6.5, height=9, units="in", res=144)
+vio_pct_as_key.plot
+dev.off()
+```
+
+
+```{r}
+viol_pct_prsnt.plot <- violations%>%
+     dplyr::select(V_Num)%>%
+     group_by(V_Num)%>%
+     summarize(n=n())%>%
+     mutate(n_pct=n/sum(n)*100)%>%
+     ggplot()+
+     #geom_col(aes(x=as.factor(V_Num), y=n_pct), fill=palette.colors(palette="ggplot2")[c(4)])+
+      geom_col(aes(x=as.factor(V_Num), y=n_pct), fill=plasma(n=1))+
+     labs(title="Percentage of Violations Observed in Businesses",
+          fill="Key Violation", 
+          x="violation number", 
+          y="Percent Observed")
+
+viol_pct_prsnt.plot
+
+png("graphics/viol_pct_prsnt.png", width=9, height=6.5, units="in", res=144)
+viol_pct_prsnt.plot
+dev.off()
+```
+
+
+
+```{r}
+#look at just the violations of interest
+#what is the division with business category
+key_viol_pct.plot <- violations%>%
+     dplyr::select(V_Num, `Inspection ID`)%>%
+     dplyr::filter(V_Num %in% V_int)%>%
+     inner_join(inspect_long)%>%
+     dplyr::filter(Results %in% c("Pass", "Pass w/ Conditions", "Fail"))%>%
+     mutate(Results=factor(Results, c("Pass w/ Conditions", "Fail", "Pass")))%>%
+     group_by(V_Num, Results)%>%
+     summarize(n=n())%>%
+     mutate(n_pct=n/sum(n)*100)%>%
+     ggplot()+
+     geom_col(aes(y=as.factor(V_Num), x=n_pct, fill=Results), 
+              position = position_dodge(preserve="single"), 
+              orientation="y")+
+     scale_fill_manual(values=plasma(n=3, begin =0.2, end=0.8, direction = 1))+
+     #scale_fill_manual(values=c("orange", "red", "green"))+
+     labs(title="Violations Used in Classification Model",
+          subtitle="as Percentage of Total Observations vs Inspection Outcome",
+          fill="Worst Inspection Outcome",
+          y="Violation Number", 
+          x="Percent Observed")
+key_viol_pct.plot
+
+png("graphics/key_viol_pct.png", width=6.5, height=9, units="in", res=144)
+key_viol_pct.plot
+dev.off()
+```
+
+
+
+```{r}
+#look at just the violations of interest
+#what is the division with business category
+key_viol_pct_prsnt.plot <- violations%>%
+     dplyr::select(V_Num, `Inspection ID`)%>%
+     dplyr::filter(V_Num %in% V_int)%>%
+     inner_join(inspect_long)%>%
+     dplyr::filter(Results %in% c("Pass", "Pass w/ Conditions", "Fail"))%>%
+     mutate(Results=factor(Results, c("Pass w/ Conditions", "Fail", "Pass")))%>%
+     group_by(V_Num, Results)%>%
+     summarize(n=n())%>%
+     mutate(n_pct=n/sum(n)*100)%>%
+     ggplot()+
+     geom_col(aes(x=as.factor(V_Num), y=n_pct, fill=Results), 
+              position = position_dodge(preserve="single"), 
+              orientation="x")+
+     scale_fill_manual(values=plasma(n=3, begin =0.2, end=0.8, direction = 1))+
+     #scale_fill_manual(values=c("orange", "red", "green"))+
+     labs(title="Violations Used in Classification Model",
+          subtitle="as Percentage of Total Observations vs Inspection Outcome",
+          fill="Worst Inspection Outcome",
+          x="Violation Number", 
+          y="Percent Observed")
+key_viol_pct_prsnt.plot
+png("graphics/key_viol_pct_prsnt.png", width=9, height=6.5, units="in", res=144)
+key_viol_pct_prsnt.plot
+dev.off()
+```
+
+
+```{r, fig.height=12}
+#look at all violations 
+#For each violation
+#what is the percentage of each pass/fail/conditional category receiving it? 
+
+key_viol_pct_w_class.data <- violations%>%
+     dplyr::select(V_Num, `Inspection ID`)%>%
+     inner_join(inspect_long)%>%
+     dplyr::filter(Results %in% c("Pass", "Pass w/ Conditions", "Fail"))%>%
+     mutate(Results=factor(Results, c("Pass w/ Conditions", "Fail", "Pass")))%>%
+     group_by(V_Num, Results)%>%
+     summarize(n=n())%>%
+     mutate(n_pct=n/sum(n)*100)
+
+data1 <- key_viol_pct_w_class.data %>%
+     filter(V_Num %in% V_int)
+
+data2 <- key_viol_pct_w_class.data %>%
+     filter(!(V_Num %in% V_int))
+
+key_viol_pct_w_class.plot <- ggplot(data = key_viol_pct_w_class.data)+
+     geom_col(data = data1,
+              aes(y=as.factor(str_pad(V_Num,2, side="left")), x=n_pct, fill=as.factor(Results)),
+              color = "black",
+              size=1) +
+     geom_col(data = data2,
+              aes(y=as.factor(str_pad(V_Num,2, side="left")), x=n_pct, fill=as.factor(Results)),
+              size=1) +     
+     scale_color_discrete(type=c("white", "black"))+
+     scale_fill_manual(values=plasma(n=3, begin =0.2, end=0.8, direction = 1))+
+     #scale_fill_manual(values=c("orange", "red", "green"))+
+     labs(title="Violations as Percentage of Total Observations",
+          subtitle="by Inspection Outcome and Use in Classificaiton Model",
+          fill="Worst Inspection Outcome",
+          color="Key Variable",
+          y="Violation Number", 
+          x="Percent Observed")+
+      theme(legend.position = ("bottom"))
+key_viol_pct_w_class.plot
+
+png("graphics/key_viol_pct_w_class.png", width=6.5, height=9, units="in", res=144)
+key_viol_pct_w_class.plot
+dev.off()
+```
+
+
+```{r}
+png("graphics/key_viol_pct_w_class_prsnt.png", width=18, height=6, units="in", res=144)
+violations%>%
+     dplyr::select(V_Num, `Inspection ID`)%>%
+     inner_join(inspect_long)%>%
+     dplyr::filter(Results %in% c("Pass", "Pass w/ Conditions", "Fail"))%>%
+     group_by(V_Num, Results)%>%
+     summarize(n=n())%>%
+     mutate(n_pct=n/sum(n)*100)%>%
+     ggplot()+
+     geom_col(aes(x=as.factor(V_Num), y=n_pct, fill=as.factor(Results), color=as.factor(V_Num%in%V_int)),
+              size=1, 
+              position = position_dodge(preserve="single"),                                                                                                        orientation="x")+
+     scale_color_discrete(type=c("grey", "black"))+
+     labs(title="Violations as Percentage of Total Observations",
+          subtitle="by Inspection Outcome and Use in Classificaiton Model",
+          fill="Worst Inspection Outcome",
+          color="Key Variable",
+          x="violation number", 
+          y="Percent Observed")
+dev.off()
+```
+#Data Set Observations
+```{r}
+n2<-inspections%>%dplyr::select(`AKA Name`, `License #`, Address)%>%
+     distinct()%>%
+     group_by(`License #`)%>%dplyr::summarize(n=n())%>%filter(n>2)
+```
+
+## community Business Summary Tables
+```{r summarized_maps, fig.width=12, fig.height = 12}
+tot_biz<-inspections%>%
+     dplyr::select(`License #`, `AKA Name`)%>%
+     distinct()%>%
+     #group_by(`License #`)%>%
+     dplyr::summarise(n=n()) 
+
+#How many businesses are in each community
+biz_by_community<-inspections%>%
+     dplyr::select(community, `License #`, `AKA Name`)%>%
+     distinct()%>%
+     group_by(community)%>%
+     summarize(biz.ct=n())
+
+#Business Information Table
+biz.info<-inner_join(inspections, communities)%>%
+     dplyr::select(-c(City, State, Zip, `Inspection Type`, `Inspection Date`, Results, Violations))%>%
+     distinct()
+
+# How many years were each business inspected?
+# Use this in downstream rate calculations
+# #broken for license #0, which impacts multiple businesses.
+# Include AKA Name to avoid conflicts where multiple businesses fall under same license
+yrs_by_biz<-inspections%>%
+     dplyr::select(`License #`,`AKA Name`,community,`Inspection Date`)%>%
+     mutate(`Inspection Date`=year(`Inspection Date`))%>%
+     distinct()%>%group_by(`License #`, `AKA Name`, community)%>%
+     summarize(yr.ct=n())
+
+#summarize mean years in business for community.
+cmty_biz_yrs<-yrs_by_biz%>%
+     group_by(community)%>%
+     dplyr::select(community, yr.ct)%>%
+     summarise(cmty.biz.yrs=mean(yr.ct))
+```
+
+###Comunity Business Inspection Rate Summary
+```{r com_biz_sum}
+#How many times was a business inspected?
+inspect_by_biz<-inspections%>%
+     dplyr::select(`License #`, `AKA Name`,community)%>%
+     group_by(`License #`, `AKA Name`, community)%>%
+     summarize(biz.insp.ct=n())
+
+#Calculate the inspections per business per year
+inspect_per_biz_per_yr<-inner_join(yrs_by_biz, inspect_by_biz)%>%
+     mutate(biz.insp.rate=biz.insp.ct/yr.ct)
+
+#What is the average inspection rate in a community?
+inspect_rate_by_cmty<-inspect_per_biz_per_yr%>%
+     dplyr::select(community, biz.insp.rate)%>%
+     group_by(community)%>%
+     summarise(yr.cmty.insp.rate=mean(biz.insp.rate))
+
+# new tibble with inspection rate and business info combined
+inspect_per_biz_per_yr_w_geom<-inner_join(biz.info, inspect_per_biz_per_yr)
+
+#summary stat.  community violation rate per inspection
+#this is interesting.  Look at the higher number of violations in outer areas.
+cmty_viol_per_inspect<-inner_join(inspections, filter(viol_mean_per_aka, n_inspect>2))%>%
+     dplyr::select(community, mean)%>%
+     group_by(community)%>%
+     summarise(cmty_viol_rate=mean(mean))
+
+cmty_results_per_inspect<-inner_join(inspections, filter(viol_mean_per_aka, n_inspect>2))%>%
+     dplyr::select(community, mean)%>%
+     group_by(community)%>%
+     summarise(cmty_viol_rate=mean(mean))
+```
+
+###Graphs of community business summaries
+
+```{r community_biz_plot}
+
+##cmty_stat_plot() graphs layered community data with aesthetic fill:
+##pre: community is defined sf shape
+##pre: data is defined summary statistic containing a 'community' name 
+## and 'stat_col' containing data
+##how:  join tibbles together.  
+##how:  aes() can reference passed element,., which is joined data.
+#how: passed element contains data, and stat_col can be used to access 
+#the specific element by name [[stat_col]]
+##post: returns a ggplot of sf shape
+
+cmty_stat_plot<-function(x, x_col,mainTitle="", fCol=waiver()){
+     inner_join(communities, x)%>%
+          ggplot()+
+          geom_sf(aes(fill=.data[[x_col]]))+
+          scale_fill_viridis_c(option = "C", name=fCol)+
+          labs(title=mainTitle)
+}
+
+#Graphs...
+png("graphics/biz_ct_map.png", width=6.5, height=9, units="in", res=144)
+#show businesses per community.
+cmty_stat_plot(biz_by_community,"biz.ct", "Businesses per Community", "Count")
+dev.off()
+
+png("graphics/biz_year_map.png", width=6.5, height=9, units="in", res=144)  
+#show mean years in business for community.
+cmty_stat_plot(cmty_biz_yrs,"cmty.biz.yrs", "Number of Years Inspected, 2000-2018", "Years") 
+dev.off()
+png("graphics/biz_insp_per_yr.png", width=6.5, height=9, units="in", res=144)  
+#Show inspections per business per year
+cmty_stat_plot(inspect_rate_by_cmty, "yr.cmty.insp.rate", "Inspections per Business per Year", "Insp. per Year")
+dev.off()
+#overlay of mean violations / inspection on community business count
+#this is interesting.  Look at the higher number of violations in outer areas.
+png("graphics/biz_viol_vs_cmty.png", width=6.5, height=9, units="in", res=144)
+cmty_stat_plot(cmty_viol_per_inspect,"cmty_viol_rate", "Mean Violations per Inspection", "Mean Viol.")
+dev.off()
+
+cmty_results<-inspect_long%>%
+     filter(Results %in% c("Fail", "Pass w/ Conditions", "Pass"))%>%
+     dplyr::select(community, Results,`Inspection ID`)%>%
+     group_by(community, Results)%>%
+     distinct()%>%
+     dplyr::summarise(insp.ct=n())%>%
+     mutate(insp.pct=insp.ct/sum(insp.ct)*100)
+
+png("graphics/insp_fail_vs_cmty.png", width=6.5, height=9, units="in", res=144)
+cmty_results%>%filter(Results=="Fail")%>%
+     cmty_stat_plot("insp.pct", "Percent Failed Inspections by Community", "Percent Failed")
+dev.off()
+```
+
+```{r, fig.width=18, fig.height=18}
+inspections.geo.f<-inspections.geo%>%
+     filter(Results%in%c("Fail"), `Inspection Type` %in% c(canvass.inspection,complaint.inspection))
+
+png("graphics/biz_fail_map.png", width=6.5, height=9, units="in", res=144)
+inner_join(demo.income,communities, by=c("Name"="community"))%>%
+     st_as_sf()%>%
+     ggplot()+
+     geom_sf(aes(fill=PCI_2014.2018, geometry=geometry))+
+     geom_sf(data=inspections.geo.f, aes(color=Results, geometry=geometry), size=1, alpha=0.8, fill="black")+
+     scale_fill_viridis_c(option = "C", name="Per Capita Income")+
+     scale_color_discrete(name="Results", type=c("steel blue"))+
+     labs(title="Location of Businesses with Failing Inspections vs. Per Capita Income")
+dev.off()
+
+```

@@ -1,0 +1,823 @@
+---
+title: "Pest Models"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+# Set Up
+
+## Libraries
+
+```{r echo=FALSE}
+# Basic packages
+#library(plyr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+
+library(tictoc)
+#devtools::install_github("collectivemedia/tictoc")
+
+# Packages for data analysis
+
+# library(caret)            # For correlation matrices
+# library(corrplot)         # Used for correlation statistics
+# library(MASS)             # Used for regression work
+
+# Packages for mapping
+library(sp)
+library(sf)
+library(raster)
+library(leaflet)
+
+# Formatting and Visualizations
+library(viridis)          # Need for viridis color palette in word cloud
+library(knitr)            # Need to manage text outputs in RMarkdown
+library(formatR)          # To manage margins
+
+```
+
+## Importing Data
+
+```{r, Importing-the-Data}
+data_cols <- cols(
+     `Inspection ID` = col_double(),
+     `DBA Name` = col_character(),
+     `AKA Name` = col_character(),
+     `License #` = col_double(),
+     `Facility Type` = col_character(),
+     Risk = col_factor(),
+     Address = col_character(),
+     City = col_character(),
+     State = col_character(),
+     Zip = col_double(),
+     `Inspection Date` = col_datetime(format = ""),
+     `Inspection Type` = col_character(),
+     Results = col_character(),
+     Violations = col_character(),
+     Latitude = col_double(),
+     Longitude = col_double(),
+     Location = col_character()
+)
+raw.data <- read_csv("food-inspections.csv", col_types = data_cols)
+```
+
+## Communities
+
+Chicago has community Areas and Neighborhoods. community areas have demographic data associated with them, but do not necessarily form homogeneous regions.
+
+Shape files from [here](https://data.cityofchicago.org/Facilities-Geographic-Boundaries/Boundaries-Neighborhoods/bbvz-uum9).
+
+```{r Importing-Maps}
+nbhd <- read_sf("ChicagoNbhd/geo_export_8956960c-bd3c-4e92-a8b2-4748382c28a3.shp")  %>%
+     sf::st_transform('+proj=longlat +datum=WGS84')
+
+communities <- read_sf("ChicagoCommunities/geo_export_55b54106-a17e-4776-86c9-12db49043238.shp")  %>%
+     sf::st_transform('+proj=longlat +datum=WGS84')
+```
+
+This creates a new df which has a GIS geometry column in place of Latitude and Longitude.
+
+```{r Mapping-Inspections}
+inspections <- raw.data  %>%
+     filter(! (is.na(Latitude) | is.na(Longitude)))  %>%
+     add_column(community = NA_character_, .after = "Address")  %>%
+     rowid_to_column  %>%
+     st_as_sf(
+          coords = c("Longitude", "Latitude"), 
+          crs= crs(nbhd))
+```
+
+## Demographics
+
+The following is a table of demographic area based on community Area
+For working with demographic fields, added a second table that has demographic information preceded by "POP_".  Master demographic table looks for a prefix
+
+```{r}
+demographic_names <- c(
+     'Layer', 'Name', 'GEOID', 'Population', 'Longitude', 'Latitude', 'Male',
+     'Female', 'White', 'Black', 'Asian', 'Hispanic', 'Native', 'TwoOrMore',
+     'Infant', 'Senior', 'Adult', 'MiddleAge', 'Young', 'Children','Juvenile'
+)
+
+demographics_columns <- cols(
+     Layer = col_character(),
+     Name = col_character(),
+     GEOID = col_character(),
+     Population = col_double(),
+     Longitude = col_character(),
+     Latitude = col_character(),
+     `Male` = col_double(),
+     `Female` = col_double(),
+     `White` = col_double(),
+     `Black` = col_double(),
+     `Asian` = col_double(),
+     `Hispanic` = col_double(),
+     `Native` = col_double(),
+     `TwoOrMore` = col_double(),
+     `Infant` = col_double(),
+     `Senior` = col_double(),
+     `Adult` = col_double(),
+     `MiddleAge` = col_double(),
+     `Young` = col_double(),
+     `Children` = col_double(),
+     `Juvenile` = col_double()
+)
+
+demographics.info <- read_csv("Demographics/CHADDemographics.csv", 
+                              col_names = demographic_names, 
+                              skip = 1, 
+                              n_max = 2,
+                              show_col_types = FALSE) %>%
+     dplyr::select('Male':'Juvenile')
+
+demographics <- read_csv("Demographics/CHADDemographics.csv",
+                         col_names = demographic_names, 
+                         col_types = demographics_columns,
+                         skip = 5
+)
+
+# Renaming variables to ensure consistency across program paradigms.
+demographic.columns.fixed <- str_c(rep("POPCT_", 15), str_to_upper(demographic_names[7:21])) %>%
+     append(demographic_names[1:6], after=0)
+
+demographics <- demographics %>%
+     setNames(demographic.columns.fixed) %>%
+     mutate(Name = str_to_upper(Name))%>%
+     as_tibble()
+
+```
+
+The table `demographicInfo` provides a description of the columns of `demographics`
+
+Here, the `communities` and `demographics` dataframe are merged to create a `communities.demographics` dataframe.
+
+```{r}
+communities <- communities  %>%
+     mutate(community = replace(community, community == "OHARE", "O'HARE"))
+
+demographics <- demographics  %>%
+     mutate(commID = str_to_upper(Name))
+
+communities.demographics <- merge(communities, 
+                                  demographics, 
+                                  by.x = "community", 
+                                  by.y = "commID")
+```
+
+Turning off the following section.
+```{r other_demographics, eval=FALSE, include=FALSE}
+demo.traf.vac <- read.csv("Demographics/Chicago_traffic_and_Vacant.csv") %>%
+     mutate(Name=str_to_upper(Name))
+
+demo.food.act <- read.csv("Demographics/Chicago_food_and_activity.csv") %>% 
+     mutate(Name=str_to_upper(Name))
+
+demo.health <- read.csv("Demographics/Chicago_Health_Status.csv") %>% 
+     mutate(Name=str_to_upper(Name))
+
+demo.income <- read.csv("Demographics/Chicago_income.csv") %>% 
+     mutate(Name=str_to_upper(Name))
+
+demo.lang.birth <- read.csv("Demographics/Chicago_lang_and_birth.csv") %>%
+     mutate(Name=str_to_upper(Name))
+
+demo.morbidity <- read.csv("Demographics/Chicago_Morbidity_Rate.csv") %>%
+     mutate(Name=str_to_upper(Name))
+
+demo.mortality <- read.csv("Demographics/Chicago_mortality.csv") %>%
+     mutate(Name=str_to_upper(Name))
+
+demo.population <- read.csv("Demographics/Chicago_pop.csv") %>% 
+     mutate(Name=str_to_upper(Name))
+
+#starts_with does not take regex.  Use matches()...
+
+#combine_demo is a function for combining all the demographic files
+#pre: dgraph is a nested tibble containing data tables in a column "demo"
+#pre: dgraph contains variable search strings for each table ina column "prefix"
+#pre: demo[i]] contains standardized demographic information
+#pre: demo[[i]] contains community names in a column, Names.
+#pre: demo[[i]] contains demographic infromation in one or more columns
+#     preceded by "prefix"
+
+#design: extra columns in demographic are excluded
+#design: pivot longer combines all columns into a long format
+#design: each demographic is appended to data file
+
+#post: Returns a tibble containing community name, demographic name, year of demographic, and data value
+
+combine_demo<-function(dgraph){
+     x<-tibble()
+     for(i in 1:length(dgraph$prefix)){
+          x<-dgraph$demo[[i]]%>%
+               dplyr::select(!c(Layer, GEOID, Latitude, Longitude))%>%
+               pivot_longer(cols=matches(dgraph$prefix[i]),           
+                            names_to=c("demo", "year"),
+                            names_sep = "\\_")%>%
+               add_row(x)
+          
+     }
+     return(x)
+}
+
+#List of demographic tibbles and prefixes used for data within.  
+demo_list <- tibble(
+     demo = list(
+          demo.traf.vac, demo.food.act, demo.health, demo.income, demo.lang.birth, 
+          demo.morbidity, demo.mortality, demo.population, demo.population
+     ), 
+     prefix = c("TRF|VAC", "HC", "HC","ED|PCI|POV","LEQ|FOR",
+           "HC","VR","VR|POP","POP|Pop" )
+     )
+
+demo.all <- combine_demo(demo_list)
+#levels(as.factor(demo.all$demo))
+
+#wide version of the demographic table
+#Needed for statistical analysis
+
+# demo.all.wide <- demo.all %>%
+#      pivot_wider(names_from = c(demo,year))
+
+```
+##Weather Data
+```{r weather_data}
+wedat.clean<-read.csv("chicago.weather.csv")
+wedat<-wedat.clean%>%dplyr::select(DATE, PRCP, SNOW, TMAX, TMIN)%>%
+                     na.omit()%>%
+                     mutate(DATE=ymd(DATE))%>%
+                     filter(DATE %within% interval(ymd("2010-01-01"), ymd("2018-06-30")))%>%
+                     mutate(YEAR=year(DATE),
+                            MONTH=month(DATE),
+                            MDAY=mday(DATE),
+                            YDAY=yday(DATE))
+```
+# Cleaning Data
+
+## Labeling Violations with community
+
+We look for the intersections of `communities` and `inspection` and create `vio.comm.int`, which is a sparse matrix. For a community Area described in row `i` of `communities` there is a row in `vio.comm.int` which lists the rows `j` in `inspections` which fall within its boundary.
+
+```{r Intersecting-Inspections-Communities}
+tic("Running st_intersects")
+vio.comm.int <- st_intersects(communities, inspections)
+toc()
+```
+
+Now, we revise `inspections` to include a column listing the community Area the location falls within.
+
+```{r Label Inspection by Community Area}
+tic("Label Inspections by Community Area")
+inspections <- inspections  %>% as_tibble()
+for (i in 1:nrow(communities)) {
+     inspections <- inspections %>%
+          rows_update(
+               tibble(
+                    rowid = unlist(vio.comm.int[[i]]), 
+                    community = communities$community[i]
+               ),
+               by = "rowid"
+          )
+}
+inspections <- inspections  %>% st_as_sf()
+toc()
+```
+
+## Risk
+Update the risk category to Low / Medium / High
+```{r}
+inspections <- inspections  %>%
+     mutate(
+          Risk = fct_recode(inspections$Risk,
+                            Low = "Risk 3 (Low)", 
+                            Medium = "Risk 2 (Medium)", 
+                            High = "Risk 1 (High)")) 
+```
+
+## Facility Type
+
+Cleaning up by Facility type.  Also, remove items after inspection paradigm changed (2018-07-01 and select only restaurants).
+
+would it be worth condensing mobile food dispensers and preparers into a single mobile category...?
+Eliminates 9 categories and condenses 1500 entries
+I think there is a compelling story to look at mobile facilities together.
+There can always be a sub-analysis as time permits.
+check and see if this is wrigley field only based on geo location.  MRB 3/24/2022
+
+Rationale:  If a facility contains a restaurant, treat as a restaurant.
+Then combine items as grocery stores.
+looking at the number of combination grocery stores (LT 100), I think it makes sense to combine with general grocery
+
+```{r}
+#For consistency, first convert facilities to lowercase.
+#Then, limit to inspection dates before paradigm changed.
+#Look for any odd cases where a facility contains restaurant in name or is misspelled.  
+inspections <- inspections  %>%
+  mutate(`Facility Type` = str_to_lower(`Facility Type`)) %>%   
+  dplyr::filter(`Inspection Date`<"2018-07-01", 
+                `Facility Type`=="restaurant")
+```
+
+## Violation Field
+
+Collect subset of violations.  
+
+```{r}
+
+#pre: Inspection data is filtered to prior to 2018-07-01
+#pre: Inspection is filtered to facility == restaurant.  
+tic("Splitting Violations")
+
+inspections <- inspections  %>% 
+     mutate(
+          `Violations` = if_else(is.na(`Violations`), 
+                                 true =  "0. NO VIOLATION RECORDED - Comments: NO VIOLATION RECORDED", 
+                                 false = `Violations`),
+     )
+
+violations <- inspections  %>%
+     dplyr::select(c("Inspection ID", "Violations"))  %>%
+     separate_rows(Violations, sep="\\|")  %>%
+     separate(Violations, c("Violation", "Observation"), 
+              sep = "- Comments: ",
+              fill = "right") %>% # Fill makes empty comments without complaining
+     separate(Violation, c("V_Num", "V_Desc"), 
+              sep = "\\.\\s",
+              extra="merge" # Only split on the first . 
+              )
+violations <- violations %>%
+     mutate(
+          V_Num = str_replace_all(violations$V_Num,"\\s",""),
+          V_Desc = str_replace_all(V_Desc,"^\\s",""),
+          V_Desc = str_replace_all(V_Desc,"\\s$",""),
+          V_Num = as.integer(V_Num))
+toc()
+```
+
+## Remove Geometry
+
+Geometry is dropped from here on out to simplify issues.
+
+```{r data_reshape}
+#drop geometry for simpicity of inspection.  
+violations <- st_drop_geometry(violations)
+inspections <- st_drop_geometry(inspections)
+
+#inspect_long is key combination for downstream calcs and figs
+inspect_long <- inspections %>%
+     dplyr::select(-c(Violations, Location))%>%
+     inner_join(violations, by = "Inspection ID")
+```
+
+```{r Cart Libraries}
+library(caret)
+library(rpart)
+library(rpart.plot)
+
+#install.packages("rattle")
+library(rattle)
+```
+
+## Complaint Classification
+Here, we identify which restaurants have had a For Cause inspection (that is, due to a complaint or suspected food poisoning) at some point in there 
+
+```{r}
+canvass.inspection <- c("Canvass", "CANVASS", "CANVAS")
+complaint.inspection <- c("Complaint", "Short Form Complaint", "Suspected Food Poisoning")
+
+
+with.complaint <- inspections %>%
+     dplyr::filter(`Inspection Type` %in% complaint.inspection)%>%
+     dplyr::select(`License #`) %>%
+     unique() %>%
+     pull()
+
+no.complaints <- inspections %>%
+     dplyr::filter( !(`License #` %in% with.complaint)) %>%
+     dplyr::filter(`Inspection Type` %in% canvass.inspection) %>%
+     dplyr::select(`License #`) %>%
+     unique() %>%
+     pull()
+
+inspections <- inspections %>%
+     filter(
+          (`License #` %in% with.complaint) | (`License #` %in% no.complaints)
+     ) %>%
+     mutate(Has_for_Cause = case_when(
+          `License #` %in% with.complaint         ~ TRUE,
+          `License #` %in% no.complaints          ~ FALSE
+     ))
+
+enough.canvass <- inspections %>%
+     filter(`Inspection Type` %in% canvass.inspection) %>%
+     group_by(`License #`) %>%
+     dplyr::summarise(NumberOfCanvass = n()) %>%
+     filter(NumberOfCanvass > 2) %>%
+     dplyr::select(`License #`) %>%
+     distinct() %>%
+     pull()
+
+
+pass.fail.inspections <- inspections %>%
+     filter(`License #` %in% enough.canvass,
+            `License #` != 0,
+            `Inspection Type` %in% c(canvass.inspection, complaint.inspection)) %>%
+     filter(Results %in% c("Pass", "Fail", "Pass w/ Conditions")) %>%
+     droplevels()
+
+pass.fail.inspections <- pass.fail.inspections %>%
+     mutate(Results = factor(Results, levels = c("Pass", "Pass w/ Conditions", "Fail")))
+
+```
+
+## Violations Per Inspection
+This creates a column for each Violation Type. For each inspection, there is a 1 for each violation reported.
+
+```{r}
+pass.fail.inspections <- pass.fail.inspections %>%
+     dplyr::select(`Inspection ID`, `License #`, `AKA Name`, `Facility Type`, 
+                   `Inspection Date`, `Inspection Type`, `Results`, `Violations`) %>%
+     mutate_at(vars(`Results`), factor)
+
+violation_count <- inspect_long %>% group_by(`Inspection ID`, V_Num) %>%
+     dplyr::summarise(n = n()) %>%
+     mutate(V_Num = str_pad(V_Num, 2, pad = "0")) %>%
+     pivot_wider(names_from = V_Num,
+                 names_prefix = "Violation_",
+                 values_from = n,
+                 values_fill = 0)
+
+# Reorder the Columns in Violation Number Order
+violation_count <- violation_count %>%
+     dplyr::select(order(colnames(violation_count)))
+
+pass.fail.inspections.wide <- pass.fail.inspections %>%
+     left_join(violation_count, by = "Inspection ID")
+```
+
+## Pass/Fail Label and Violation Frequency
+Here, we label restaurants as having failed at least once, or passed conditionally at least once, or passes always.
+
+```{r}
+
+# Get list of restaurants who have failed
+restaurants.have.failed <- pass.fail.inspections.wide %>%
+     filter(Results == "Fail") %>%
+     dplyr::select(`License #`) %>%
+     distinct(`License #`) %>%
+     pull()
+
+# Get list of restaurants who have passed conditionally
+
+restaurants.passed.conditionally <- pass.fail.inspections.wide %>%
+     filter(Results == "Pass w/ Conditions", 
+            !(`License #` %in% restaurants.have.failed)) %>%
+     dplyr::select(`License #`) %>%
+     distinct(`License #`) %>%
+     pull()
+
+# Get list of restaurants who have alway passed
+
+restaurants.always.pass <- pass.fail.inspections.wide %>%
+     filter(Results == "Pass",
+            !(`License #` %in% restaurants.have.failed),
+            !(`License #` %in% restaurants.passed.conditionally)
+            ) %>%
+     dplyr::select(`License #`) %>%
+     distinct(`License #`) %>%
+     pull()
+
+# Tag 
+
+pass.fail.inspections.wide <- pass.fail.inspections.wide %>%
+     mutate(Always.Results = case_when(
+          `License #` %in% restaurants.have.failed          ~ "Fails",
+          `License #` %in% restaurants.passed.conditionally ~ "Conditional",
+          `License #` %in% restaurants.always.pass          ~ "Passes")
+          )
+
+ViolationNumbers <-  c(33, 34, 0, 32, 45, 39, 41, 35, 36, 38, 43, 14, 16, 30, 31, 
+                       40, 11, 37, 3, 21, 19, 27, 42, 2, 18, 22, 29, 8, 24, 28, 
+                       6, 44, 13, 25, 1, 9, 10, 12, 26, 70, 7, 17, 23, 4, 5, 15, 20)
+
+ViolationNumbers <- str_pad(ViolationNumbers, 2, pad = "0")
+ViolationColumns <- paste("Violation_", sort(ViolationNumbers), sep="")
+
+restaurant.summary <- pass.fail.inspections.wide %>%
+     group_by(`License #`) %>%
+     dplyr::summarize_at(ViolationColumns, mean) %>%
+     mutate(Always.Results = case_when(
+          `License #` %in% restaurants.have.failed          ~ "Fails",
+          `License #` %in% restaurants.passed.conditionally ~ "Conditional",
+          `License #` %in% restaurants.always.pass          ~ "Passes")
+          ) %>%
+     mutate(Always.Results = factor(
+               Always.Results, 
+               levels = c("Passes", "Conditional", "Fails"))
+          )
+```
+
+# Violation 18 Study
+
+```{r}
+library(wordcloud)        # For `wordcloud` and `comparison.cloud`.
+library(topicmodels)      # Text clustering commands.
+library(quanteda)         # Text analysis packages. Used to make DFM.
+library(readtext)         # Reader for text input along with quanteda.
+library(Matrix)           # Need to convert from a Matrix sparse matrix class.
+library(SparseM)          # Need to convert to a SparseM matrix class.
+```
+
+```{r fig.width=10, fig.height=10}
+# As suggested in the `quanteda` documentation, we first create a DFM, then
+# take only those features that occur in the 95th percentile or more of frequencies
+# in the DFM as a whole, but occur in no more than 10% of all the headlines.
+# The hope is that these words will be specific to more select topics.
+
+# Maximize term frequency.  Since we know this is a mixture of products, we want to let algorithm sort out groups
+# no guarantee that a term will be in any number of reviews for the class
+
+#terms bring out "fli, insect, roach"
+#categories
+a=4
+#min term
+b=0.1
+#max term
+c=.95
+
+justrats <- violations %>%
+     filter(V_Num == 18)
+
+script_tokens <- tokens(justrats$Observation, 
+                        remove_punct = TRUE, 
+                        remove_numbers = TRUE,
+                        remove_symbols = TRUE,
+                        split_hyphens = TRUE,
+                        split_tags = TRUE)
+
+script_dfm <- script_tokens %>%
+           dfm() %>%
+           dfm_remove(pattern = stopwords("en")) %>%
+           dfm_remove(pattern = c()) %>%
+           dfm_wordstem() %>%
+           dfm_trim(min_termfreq = b,
+                    termfreq_type = "quantile",
+                    max_docfreq = c,
+                    docfreq_type = "prop")
+
+script_tm <- convert(script_dfm, to="topicmodels")
+
+# # Do the LDA analysis.
+script_lda <- LDA(script_tm, k=a)
+script_top <- topics(script_lda)
+# Convert back to DFM
+script_dfm_fnl <- as.dfm(script_tm)
+
+png("../img/vermin_cloud.png", width=6.5, height=9, units="in", res=144)
+dfm_group(script_dfm_fnl, groups=script_top) %>%
+     convert(to="matrix") %>% 
+     t() %>%
+     comparison.cloud(
+          max.words=250, 
+          scale=c(4,1),
+          match.colors = TRUE, 
+          title.size = 2, 
+          title.bg.colors = "white", 
+          colors=viridis(a, option="C", end=.8)
+     ) + 
+ title(main = "Terms Used in Violation 18", 
+       sub = paste("Script Categories =", a,"min_freq =",b,"max_freq =",c, sep=" ")) 
+dev.off()
+
+
+
+```
+#filter inspections for downstream calculations
+
+```{r}
+inspections<-inspections%>%filter(`Inspection Type` %in% c(canvass.inspection, complaint.inspection),
+                                  Results %in% c("Pass", "Pass w/ Conditions", "Fail"))
+```
+
+```{r}
+rodents <- c("rat", "rodent", "mice", "mouse")
+has.rats <- violations %>%
+     filter(V_Num == 18) %>%
+     filter(str_detect(Observation, pattern=regex(paste(rodents, collapse="|"), ignore_case=TRUE))) %>%
+     dplyr::select(`Inspection ID`) %>%
+     pull()
+violations <- violations %>%
+     mutate(Has_Rats = ifelse(
+          `Inspection ID` %in% has.rats, TRUE, FALSE))
+inspections <- inspections %>%
+     mutate(Has_Rats = ifelse(
+          `Inspection ID` %in% has.rats, TRUE, FALSE))
+rat.months <- inspections %>%
+     filter(Has_Rats,
+           `Inspection Date`>"2010-06-30")%>%
+     group_by(month=month(`Inspection Date`, label=TRUE)) %>%
+     dplyr::summarize(n = n())
+
+cmty.stats<-inspections%>%
+     mutate(month=month(`Inspection Date`, label=TRUE), year=year(`Inspection Date`))%>%
+     filter(`Inspection Date`>"2010-06-30")%>%
+     group_by(month)%>%
+     dplyr::summarize(cmty.insp.p.month=n())
+
+cmty.stats2<-inspections%>%
+     dplyr::select(community, `License #`)%>%
+     group_by(community)%>%
+     dplyr::summarize(cmty.rest=n())
+rat.months<-rat.months%>%
+            inner_join(cmty.stats, by=c("month"="month"))%>%
+            mutate(n_pct=n/cmty.insp.p.month*100)
+  
+rat.places <- inspections %>%
+     group_by(`community`) %>%
+     dplyr::summarize(frequency = mean(Has_Rats))
+```
+
+```{r}
+plot(rat.months)
+
+rodent_month_bar<-
+      ggplot(rat.months, aes(x=month, y=n_pct))+
+      geom_col(fill=as.list(plasma(n=1, begin=0.2, end=0.8)))+
+      scale_y_continuous(labels=scales::percent_format(scale = 1))+
+      labs(title="Percentage of Monthly Inspections Observing Rodents",
+           y="Percent of Monthly Inspections")
+
+show(rodent_month_bar)
+png("graphics/rodent_month_bar.png", width=6.5, height=3.5, res=144, units="in")
+rodent_month_bar
+dev.off()
+
+```
+```{r}
+communities.rats <- communities %>%
+     left_join(rat.places)
+rat.map <- ggplot(communities.rats, aes(fill = frequency)) +
+     geom_sf() + 
+     scale_fill_continuous()
+rat.map
+```
+#Weather Analysis
+Look at the pattern of rat observation frequency and weather
+Alternately, look at violation 18 frequency...
+To minimize small sample sizes, cull days with less than 20 inspections
+
+```{r rats}
+daily.inspect<-inspections%>%
+  dplyr::group_by(`Inspection Date`, Has_Rats)%>%
+  dplyr::summarise(n=n())%>%
+  mutate(day.rat.pct=round(n/sum(n)*100, 1),
+         day.insp.ct=sum(n))%>%
+  filter(day.insp.ct>=20)
+daily.inspect%>%
+  filter(Has_Rats==TRUE)%>%
+  ggplot()+geom_col(aes(x=`Inspection Date`, y=`day.rat.pct`))+labs(title="Percentage of inspections with mention of rodents")
+daily.inspect%>%
+  group_by(`Inspection Date`, day.insp.ct)%>%
+  ggplot()+geom_col(aes(x=`Inspection Date`, y=`day.insp.ct`))+labs(title="Daily Inspection Count")
+```
+
+##Insects
+```{r}
+insect <- c("roach", "fly", "flies", "insect", "gnat", "bug")
+has.insects <- violations %>%
+     filter(V_Num == 18) %>%
+    ### ignore cases (MRB 4/11/22)
+     filter(str_detect(Observation, pattern=regex(paste(insect, collapse="|"), ignore_case=TRUE))) %>%
+     dplyr::select(`Inspection ID`) %>%
+     pull()
+violations <- violations %>%
+     mutate(Has_insects = ifelse(
+          `Inspection ID` %in% has.insects, TRUE, FALSE))
+inspections <- inspections %>%
+     mutate(Has_insects = ifelse(
+          `Inspection ID` %in% has.insects, TRUE, FALSE))
+#variables can be named in group statements.  MRB 4/11/22
+#limit by months after 6/30.  Data set ends on 6/30/18.  
+#This avoids uneven months
+insect.months <- inspections %>%
+     filter(Has_insects,
+            `Inspection Date`>"2010-06-30")%>%
+     group_by(month=month(`Inspection Date`, label=TRUE)) %>%
+     dplyr::summarize(n = n())%>%
+     ungroup()
+cmty.stats<-inspections%>%
+     mutate(month=month(`Inspection Date`, label=TRUE), year=year(`Inspection Date`))%>%
+    filter(`Inspection Date`>"2010-06-30")%>%
+     group_by(month)%>%
+     dplyr::summarize(cmty.insp.p.month=n())
+cmty.stats2<-inspections%>%
+     dplyr::select(community, `License #`)%>%
+     group_by(community)%>%
+     dplyr::summarize(cmty.rest=n())
+insect.months<-insect.months%>%
+            inner_join(cmty.stats, by=c("month"="month"))%>%
+            mutate(n_pct=n/cmty.insp.p.month*100)
+#note this is per thousand (MRB 5/11/22)
+insect.places <- inspections %>%
+     inner_join(cmty.stats2)%>%
+     group_by(`community`) %>%
+    dplyr::summarize(frequency = mean(Has_insects/cmty.rest)*1000)
+```
+
+```{r}
+plot(insect.months$month, insect.months$n_pct)
+
+insect_month_bar<-
+ggplot(insect.months, aes(x=month, y=n_pct))+
+       geom_col(fill=plasma(n=1, begin=0.2, end=0.8))+
+      scale_y_continuous(labels=scales::percent_format(scale = 1))+
+      labs(title="Percentage of Monthly Inspections Observing Insects",
+           y="Percent of Monthly Inspections")
+
+show(insect_month_bar)
+png("graphics/insect_month_bar.png", width=6.5, height=3.5, res=144, units="in")
+insect_month_bar
+dev.off()
+
+```
+
+```{r}
+communities.insects <- communities %>%
+     left_join(insect.places)
+#Need to check out riverdale community as the outlier.  MRB 5/11/22
+insect.map <- ggplot(communities.insects, aes(fill = frequency)) +
+     geom_sf() + 
+     scale_fill_continuous()
+insect.map
+#Need to check out riverdale community as the outlier.  MRB 5/11/22
+communities.insects%>% 
+  filter(community!="RIVERDALE")%>%
+  ggplot() +
+     geom_sf(data=dplyr::select(communities.insects,!c(community)))+
+     geom_sf(aes(fill = frequency)) + 
+     scale_fill_continuous()
+insect.map
+```
+```{r insects}
+#Add filter step in to get even distribution of months
+#Inspection date ends June 30, 2018...
+daily.inspect<-inspections%>%
+  filter(`Inspection Date`>"2010-06-30")%>%
+  dplyr::group_by(`Inspection Date`, Has_insects)%>%
+  dplyr::summarise(n=n())%>%
+  mutate(day.insect.pct=round(n/sum(n)*100, 3),
+         day.insp.ct=sum(n))%>%
+  filter(day.insp.ct>=20)
+
+daily.inspect %>%
+  filter(Has_insects==TRUE)%>%
+  ggplot()+geom_col(aes(x=`Inspection Date`, y=`day.insect.pct`))+labs(title="Percentage of inspections with mention of insects")
+
+```
+
+##weather patterns
+```{r fig.width=18, fig.height=12}
+wedat<-wedat%>% mutate(Has_rain=if_else(PRCP>0, TRUE, FALSE),
+                       weather_band=case_when(TMIN<33  ~ "TMIN LT 33",
+                                              TMIN<=50 ~ "TMIN 32-50",
+                                              TMIN<=70 ~ "TMIN 51-70",
+                                              TMIN>70 ~  "TMIN MT 70"))%>%
+                        mutate(weather_band=fct_relevel(weather_band, "TMIN LT 33","TMIN 32-50","TMIN 51-70", "TMIN MT 70"))
+          
+insect.weath<-inner_join(daily.inspect, wedat, by=c("Inspection Date"="DATE"))
+
+insect_by_month<-
+  insect.weath%>%
+  group_by(YEAR, MONTH, Has_insects)%>%
+  dplyr::summarize(insp=sum(n))%>%
+  ggplot()+
+          geom_col(aes(x=1:length(insp), 
+                       y=insp, 
+                       fill=Has_insects), 
+                   position=position_dodge(preserve="single"))+
+        scale_fill_discrete(type=plasma(n=2, begin=0.1, end=0.8))+
+  labs(title="Daily Inspection Count")
+insect_by_month
+png("graphics/insect_by_month.png", width=12, height=8, res=144, units="in")
+insect_by_month
+dev.off()
+insect_by_temp_box<-
+  insect.weath%>%
+  dplyr::filter(Has_insects==TRUE)%>%
+  ggplot()+
+      geom_boxplot(aes(y=day.insect.pct, 
+                       group=weather_band, 
+                       fill=weather_band),
+                   position=position_dodge(preserve="single"))+
+      labs(title="Daily Percentage of Inspections with Insect Violations Observed vs. Minimum Temperature")+
+      scale_fill_discrete(type=plasma(n=4, begin=0.1, end=0.8))+
+      theme(axis.text.x = element_blank())
+
+insect_by_temp_box
+png("graphics/insect_by_temp_box.png", width=12, height=8, res=144, units="in")
+insect_by_temp_box
+dev.off()
+```

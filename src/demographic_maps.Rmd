@@ -1,0 +1,429 @@
+---
+title: "Demographic Maps"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Set Up
+
+## Libraries
+
+```{r echo=FALSE}
+# Basic packages
+library(plyr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+
+# Packages for mapping
+library(sp)
+library(raster)
+library(sf)
+library(leaflet)
+
+# Formatting and Visualizations
+library(viridis)          # Need for viridis color palette in word cloud
+library(knitr)            # Need to manage text outputs in RMarkdown
+library(formatR)          # To manage margins
+
+```
+
+## Importing Data
+
+```{r, Importing-the-Data}
+data_cols <- cols(
+     `Inspection ID` = col_double(),
+     `DBA Name` = col_character(),
+     `AKA Name` = col_character(),
+     `License #` = col_double(),
+     `Facility Type` = col_character(),
+     Risk = col_factor(),
+     Address = col_character(),
+     City = col_character(),
+     State = col_character(),
+     Zip = col_double(),
+     `Inspection Date` = col_datetime(format = ""),
+     `Inspection Type` = col_character(),
+     Results = col_character(),
+     Violations = col_character(),
+     Latitude = col_double(),
+     Longitude = col_double(),
+     Location = col_character()
+)
+raw.data <- read_csv("food-inspections.csv", col_types = data_cols)
+```
+
+## Communities
+
+Chicago has community Areas and Neighborhoods. community areas have demographic data associated with them, but do not necessarily form homogeneous regions.
+
+Shape files from [here](https://data.cityofchicago.org/Facilities-Geographic-Boundaries/Boundaries-Neighborhoods/bbvz-uum9).
+
+```{r Importing-Maps}
+nbhd <-
+  read_sf("ChicagoNbhd/geo_export_8956960c-bd3c-4e92-a8b2-4748382c28a3.shp")  %>%
+  sf::st_transform('+proj=longlat +datum=WGS84')
+
+communities <-
+  read_sf("ChicagoCommunities/geo_export_55b54106-a17e-4776-86c9-12db49043238.shp")  %>%
+  sf::st_transform('+proj=longlat +datum=WGS84')
+```
+
+This creates a new df which has a GIS geometry column in place of Latitude and Longitude.
+
+```{r Mapping-Inspections}
+inspections <- raw.data  %>%
+     filter(! (is.na(Latitude) | is.na(Longitude)))  %>%
+     add_column(community = NA_character_, .after = "Address")  %>%
+     rowid_to_column  %>%
+     st_as_sf(
+          coords = c("Longitude", "Latitude"), 
+          crs= crs(nbhd))
+```
+
+## Demographics
+
+The following is a table of demographic area based on community Area
+For working with demographic fields, added a second table that has demographic information preceded by "POP_".  Master demographic table looks for a prefix
+
+```{r}
+demographic_names <- c(
+     'Layer', 'Name', 'GEOID', 'Population', 'Longitude', 'Latitude', 'Male',
+     'Female', 'White', 'Black', 'Asian', 'Hispanic', 'Native', 'TwoOrMore',
+     'Infant', 'Senior', 'Adult', 'MiddleAge', 'Young', 'Children','Juvenile'
+)
+
+demographics_columns <- cols(
+     Layer = col_character(),
+     Name = col_character(),
+     GEOID = col_character(),
+     Population = col_double(),
+     Longitude = col_character(),
+     Latitude = col_character(),
+     `Male` = col_double(),
+     `Female` = col_double(),
+     `White` = col_double(),
+     `Black` = col_double(),
+     `Asian` = col_double(),
+     `Hispanic` = col_double(),
+     `Native` = col_double(),
+     `TwoOrMore` = col_double(),
+     `Infant` = col_double(),
+     `Senior` = col_double(),
+     `Adult` = col_double(),
+     `MiddleAge` = col_double(),
+     `Young` = col_double(),
+     `Children` = col_double(),
+     `Juvenile` = col_double()
+)
+
+demographics.info <- read_csv("Demographics/CHADDemographics.csv", 
+                              col_names = demographic_names, 
+                              skip = 1, 
+                              n_max = 2,
+                              show_col_types = FALSE) %>%
+     dplyr::select('Male':'Juvenile')
+
+demographics <- read_csv("Demographics/CHADDemographics.csv",
+                         col_names = demographic_names, 
+                         col_types = demographics_columns,
+                         skip = 5
+)
+
+# Renaming variables to ensure consistency across program paradigms.
+demographic.columns.fixed <- str_c(rep("POPCT_", 15), 
+                                   str_to_upper(demographic_names[7:21])) %>%
+     append(demographic_names[1:6], after=0)
+
+demographics <- demographics %>%
+     setNames(demographic.columns.fixed) %>%
+     mutate(Name = str_to_upper(Name))%>%
+     as_tibble()
+
+```
+
+The table `demographicInfo` provides a description of the columns of `demographics`
+
+Here, the `communities` and `demographics` dataframe are merged to create a `communities.demographics` dataframe.
+
+```{r}
+communities <- communities  %>%
+     mutate(community = replace(community, community == "OHARE", "O'HARE"))
+
+demographics <- demographics  %>%
+     mutate(commID = str_to_upper(Name))
+
+communities.demographics <- merge(communities, 
+                                  demographics, 
+                                  by.x = "community", 
+                                  by.y = "commID")
+```
+
+```{r other_demographics}
+demo.traf.vac <-
+  read.csv("Demographics/Chicago_traffic_and_Vacant.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+demo.food.act <-
+  read.csv("Demographics/Chicago_food_and_activity.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+demo.health <-
+  read.csv("Demographics/Chicago_Health_Status.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+demo.income <-
+  read.csv("Demographics/Chicago_income.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+demo.lang.birth <-
+  read.csv("Demographics/Chicago_lang_and_birth.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+demo.morbidity <-
+  read.csv("Demographics/Chicago_Morbidity_Rate.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+demo.mortality <-
+  read.csv("Demographics/Chicago_mortality.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+demo.population <-
+  read.csv("Demographics/Chicago_pop.csv") %>% 
+  mutate(Name = str_to_upper(Name))
+```
+
+```{r demo_graphs, fig.width=12, fig.height=12}
+ggplot(communities.demographics) + geom_sf(aes(fill = as.integer(POPCT_WHITE)))
+ggplot(communities.demographics) + geom_sf(aes(fill = as.integer(POPCT_BLACK)))
+ggplot(communities.demographics) + geom_sf(aes(fill = as.integer(POPCT_ASIAN)))
+ggplot(communities.demographics) + geom_sf(aes(fill = as.integer(POPCT_HISPANIC)))
+ggplot(communities.demographics) + geom_sf(aes(fill = as.integer(POPCT_SENIOR)))
+ggplot(communities.demographics) + geom_sf(aes(fill = as.integer(POPCT_ADULT)))
+ggplot(communities.demographics) + geom_sf(aes(fill = as.integer(POPCT_CHILDREN)))
+
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = TRF_2018, geometry = geometry))
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = TRF_2017, geometry = geometry))
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = TRF_2016, geometry = geometry))
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = VAC_2014.2018, geometry = geometry))
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = VAC_2013.2017, geometry = geometry))
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = VAC_2012.2016, geometry = geometry))
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = VAC_2011.2015, geometry = geometry))
+ggplot(inner_join(demo.traf.vac, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = VAC_2010.2014, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = PCI_2014.2018, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = PCI_2013.2017, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = PCI_2012.2016, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = PCI_2011.2015, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = PCI_2010.2014, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = POV_2014.2018, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = POV_2013.2017, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = POV_2012.2016, geometry = geometry))
+ggplot(inner_join(demo.income, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = POV_2011.2015, geometry = geometry))
+ggplot(inner_join(demo.health, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = HCSOHS_2016.2018, geometry = geometry))
+ggplot(inner_join(demo.health, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = HCSOHS_2015.2017, geometry = geometry))
+ggplot(inner_join(demo.health, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = HCSOHS_2014.2016, geometry = geometry))
+ggplot(inner_join(demo.health, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = HCSOHSP_2016.2018, geometry = geometry))
+ggplot(inner_join(demo.health, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = HCSOHSP_2015.2017, geometry = geometry))
+ggplot(inner_join(demo.health, communities, by = c("Name" = "community"))) +
+  geom_sf(aes(fill = HCSOHSP_2014.2016, geometry = geometry))
+```
+
+# Cleaning Data
+
+## Labeling Violations with Community
+
+We look for the intersections of `communities` and `inspection` and create `vio.comm.int`, which is a sparse matrix. For a Community Area descriped in row `i` of `communities` there is a row in `vio.comm.int` which lists the rows `j` in `inspections` which fall within its boundary.
+
+```{r}
+vio.comm.int <- st_intersects(communities, inspections)
+```
+
+Now, we revise `inspections` to include a column listing the Community Area the location falls within.
+
+```{r message=FALSE, warning=FALSE}
+inspections <- inspections  %>% as_tibble()
+for (i in 1:nrow(communities)) {
+     inspections <- inspections %>%
+          rows_update(
+               tibble(
+                    rowid = unlist(vio.comm.int[[i]]), 
+                    community = communities$community[i]
+               )
+          )
+}
+inspections <- inspections  %>% st_as_sf()
+```
+
+## Risk
+
+```{r}
+inspections <- inspections  %>%
+     mutate(
+          Risk = fct_recode(inspections$Risk,
+               Low = "Risk 3 (Low)", 
+               Medium = "Risk 2 (Medium)", 
+               High = "Risk 1 (High)")) 
+```
+
+## Facility Type
+
+```{r}
+#For consistency, first convert facilities to lowercase.
+#Then, limit to inspection dates before paradigm changed.
+#Look for any odd cases where a facility contains restaurant in name or is misspelled.  
+inspections <- inspections  %>%
+     mutate(`Facility Type` = str_to_lower(`Facility Type`)) %>%   
+     dplyr::filter(`Inspection Date`<"2018-07-01", 
+                   `Facility Type`=="restaurant")
+```
+# Exploration Tools
+
+## Remove Geometry
+
+Geometry is dropped from here on out to simplify issues.
+
+```{r data_reshape}
+#keep copy for calculation purposes
+inspections.geo<-inspections
+
+#drop geometry for simpicity of inspection.  
+inspections.noGeo <- st_drop_geometry(inspections)
+```
+
+```{r biz_summary, fig.width=12, fig.height = 12}
+#How many businesses are in each community
+biz_by_community<-inspections.noGeo%>%dplyr::select(community, `License #`, `AKA Name`)%>%distinct()%>%group_by(community)%>%dplyr::summarize(biz.ct=n())
+
+#Business Information Table
+biz.info<-inspections%>%
+  dplyr::select(-c(City, State, Zip, `Inspection Type`, `Inspection Date`, Results, Violations))%>%
+  distinct()
+
+# How many years were each business inspected?
+# Use this in downstream rate calculations
+# #broken for license #0, which impacts multiple businesses.
+# Include AKA Name to avoid conflicts where multiple businesses fall under same license
+yrs_by_biz<-inspections.noGeo%>%
+  dplyr::select(`License #`,`AKA Name`,community,`Inspection Date`)%>%
+  mutate(`Inspection Date`=year(`Inspection Date`))%>%
+  distinct()%>%group_by(`License #`, `AKA Name`, community)%>%
+  dplyr::summarize(yr.ct=n())
+
+#How mnany times was a business inspected?
+inspect_by_biz<-inspections.noGeo%>%
+  dplyr::select(`License #`, `AKA Name`,community)%>%
+  group_by(`License #`, `AKA Name`, community)%>%
+  dplyr::summarize(biz.insp.ct=n())
+
+#Calculate the inspections per business per year
+inspect_per_biz_per_yr<-inner_join(yrs_by_biz, inspect_by_biz)%>%
+  mutate(biz.insp.rate=biz.insp.ct/yr.ct)
+
+#What is the average inspection rate in a community?
+inspect_rate_by_cmty<-inspect_per_biz_per_yr%>%
+  dplyr::select(community, biz.insp.rate)%>%
+  group_by(community)%>%
+  dplyr::summarise(yr.cmty.insp.rate=mean(biz.insp.rate))
+
+# new tibble with inspection rate and business info combined
+inspect_per_biz_per_yr_w_geom<-inner_join(biz.info, inspect_per_biz_per_yr)
+
+```
+
+```{r biz_graphs}
+#Show the number of businesses in a community
+inner_join(communities, biz_by_community, by = c("community" = "community")) %>%
+  ggplot() +
+  geom_sf(aes(fill = biz.ct)) +
+  scale_fill_viridis_c(option = "C", name = "Count") + 
+  labs(title = "Businesses per Community")
+
+#Show the community inspection rate
+inner_join(communities,
+           inspect_rate_by_cmty,
+           by = c("community" = "community")) %>%
+  ggplot() +
+  geom_sf(aes(fill = yr.cmty.insp.rate)) +
+  scale_fill_viridis_c(option = "C", name = "Inspections") + 
+  labs(title = "Average Inspections per Business per Year by Community")
+
+#Show an overlay of business inspection frequency
+inner_join(communities,
+           inspect_rate_by_cmty,
+           by = c("community" = "community")) %>%
+  ggplot() + geom_sf(aes(fill = yr.cmty.insp.rate)) +
+  geom_sf(data = inspect_per_biz_per_yr_w_geom, aes(color = biz.insp.rate)) +
+  scale_fill_viridis_c(option = "C", name = "Cmty. Inspecitons") +
+  scale_color_viridis_c(option = "C", name = "Bus. Inspections") + 
+  labs(title = "Business Inspection Frequency vs. Community Inspection Frequency)")
+
+#summarize mean years in business for community.
+cmty_biz_yrs <- inspect_per_biz_per_yr %>%
+  group_by(community) %>%
+  dplyr::select(community, yr.ct) %>%
+  dplyr::summarise(cmty.biz.yrs = mean(yr.ct))
+
+#show mean years in business for community.
+inner_join(communities, cmty_biz_yrs, by = c("community" = "community")) %>%
+  ggplot() +
+  geom_sf(aes(fill = cmty.biz.yrs)) +
+  scale_fill_viridis_c(option = "C", name = "Age (Years)") +
+  labs(title = "Average Business Age by Community")
+  
+```
+
+```{r output_key_graphs}
+
+png("img/biz_ct_map.png", width=6.5, height=9, units="in", res=144)
+
+inner_join(communities, biz_by_community, by = c("community" = "community")) %>%
+  ggplot() +
+  geom_sf(aes(fill = biz.ct)) +
+  scale_fill_viridis_c(option = "C", name = "Count") + 
+  labs(title = "Businesses per Community")
+
+dev.off()
+
+png("img/demo_pop.png", width=6.5, height=9, units="in", res=144)
+ggplot(communities.demographics, ) + 
+  geom_sf(aes(fill = as.integer(Population))) +
+    scale_fill_viridis_c(option = "C", name = "Population") + 
+  labs(title = "Population by Community") 
+
+dev.off()
+
+png("img/median_income.png", width=6.5, height=9, units="in", res=144)
+inner_join(communities, demo.income, by = c("community" = "Name")) %>%
+  ggplot() +
+  geom_sf(aes(fill = PCI_2014.2018)) +
+  scale_fill_viridis_c(option = "C", name = "Dollars") + 
+  labs(title = "Per Capita Income, 2014 - 2018") 
+
+dev.off()
+
+# Probanility two residents chosen at random will belong to different family income levels
+png("img/economic_diversity.png", width=6.5, height=9, units="in", res=144)
+inner_join(communities, demo.income, by = c("community" = "Name")) %>%
+  ggplot() +
+  geom_sf(aes(fill = EDX_2014.2018)) +
+  scale_fill_viridis_c(option = "C", name = "Probability") + 
+  labs(title = "Economic Diversity Index, 2014 - 2018") 
+dev.off()
+
+```
