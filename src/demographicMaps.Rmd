@@ -51,7 +51,7 @@ data_cols <- cols(
      Longitude = col_double(),
      Location = col_character()
 )
-raw.data <- read_csv("food-inspections.csv", col_types = data_cols)
+raw.data <- read_csv("../data/food-inspections.csv", col_types = data_cols)
 ```
 
 ## Communities
@@ -62,11 +62,11 @@ Shape files from [here](https://data.cityofchicago.org/Facilities-Geographic-Bou
 
 ```{r Importing-Maps}
 nbhd <-
-  read_sf("ChicagoNbhd/geo_export_8956960c-bd3c-4e92-a8b2-4748382c28a3.shp")  %>%
+  read_sf("../data/ChicagoNbhd/geo_export_8956960c-bd3c-4e92-a8b2-4748382c28a3.shp")  %>%
   sf::st_transform('+proj=longlat +datum=WGS84')
 
 communities <-
-  read_sf("ChicagoCommunities/geo_export_55b54106-a17e-4776-86c9-12db49043238.shp")  %>%
+  read_sf("../data/ChicagoCommunities/geo_export_55b54106-a17e-4776-86c9-12db49043238.shp")  %>%
   sf::st_transform('+proj=longlat +datum=WGS84')
 ```
 
@@ -118,14 +118,14 @@ demographics_columns <- cols(
      `Juvenile` = col_double()
 )
 
-demographics.info <- read_csv("Demographics/CHADDemographics.csv", 
+demographics.info <- read_csv("../data/Demographics/CHADDemographics.csv", 
                               col_names = demographic_names, 
                               skip = 1, 
                               n_max = 2,
                               show_col_types = FALSE) %>%
      dplyr::select('Male':'Juvenile')
 
-demographics <- read_csv("Demographics/CHADDemographics.csv",
+demographics <- read_csv("../data/Demographics/CHADDemographics.csv",
                          col_names = demographic_names, 
                          col_types = demographics_columns,
                          skip = 5
@@ -162,28 +162,28 @@ communities.demographics <- merge(communities,
 
 ```{r other_demographics}
 demo.traf.vac <-
-  read.csv("Demographics/Chicago_traffic_and_Vacant.csv") %>% 
+  read.csv("../data/Demographics/Chicago_traffic_and_Vacant.csv") %>% 
   mutate(Name = str_to_upper(Name))
 demo.food.act <-
-  read.csv("Demographics/Chicago_food_and_activity.csv") %>% 
+  read.csv("../data/Demographics/Chicago_food_and_activity.csv") %>% 
   mutate(Name = str_to_upper(Name))
 demo.health <-
-  read.csv("Demographics/Chicago_Health_Status.csv") %>% 
+  read.csv("../data/Demographics/Chicago_Health_Status.csv") %>% 
   mutate(Name = str_to_upper(Name))
 demo.income <-
-  read.csv("Demographics/Chicago_income.csv") %>% 
+  read.csv("../data/Demographics/Chicago_income.csv") %>% 
   mutate(Name = str_to_upper(Name))
 demo.lang.birth <-
-  read.csv("Demographics/Chicago_lang_and_birth.csv") %>% 
+  read.csv("../data/Demographics/Chicago_lang_and_birth.csv") %>% 
   mutate(Name = str_to_upper(Name))
 demo.morbidity <-
-  read.csv("Demographics/Chicago_Morbidity_Rate.csv") %>% 
+  read.csv("../data/Demographics/Chicago_Morbidity_Rate.csv") %>% 
   mutate(Name = str_to_upper(Name))
 demo.mortality <-
-  read.csv("Demographics/Chicago_mortality.csv") %>% 
+  read.csv("../data/Demographics/Chicago_mortality.csv") %>% 
   mutate(Name = str_to_upper(Name))
 demo.population <-
-  read.csv("Demographics/Chicago_pop.csv") %>% 
+  read.csv("../data/Demographics/Chicago_pop.csv") %>% 
   mutate(Name = str_to_upper(Name))
 ```
 
@@ -390,7 +390,7 @@ inner_join(communities, cmty_biz_yrs, by = c("community" = "community")) %>%
 
 ```{r output_key_graphs}
 
-png("img/biz_ct_map.png", width=6.5, height=9, units="in", res=144)
+png("../img/biz_ct_map.png", width = 6.5, height = 6.5, units ="in", res=144)
 
 inner_join(communities, biz_by_community, by = c("community" = "community")) %>%
   ggplot() +
@@ -400,7 +400,7 @@ inner_join(communities, biz_by_community, by = c("community" = "community")) %>%
 
 dev.off()
 
-png("img/demo_pop.png", width=6.5, height=9, units="in", res=144)
+png("../img/demo_pop.png", width = 6.5, height = 6.5, units ="in", res=144)
 ggplot(communities.demographics, ) + 
   geom_sf(aes(fill = as.integer(Population))) +
     scale_fill_viridis_c(option = "C", name = "Population") + 
@@ -408,7 +408,7 @@ ggplot(communities.demographics, ) +
 
 dev.off()
 
-png("img/median_income.png", width=6.5, height=9, units="in", res=144)
+png("../img/median_income.png", width = 6.5, height = 6.5, units ="in", res=144)
 inner_join(communities, demo.income, by = c("community" = "Name")) %>%
   ggplot() +
   geom_sf(aes(fill = PCI_2014.2018)) +
@@ -418,7 +418,7 @@ inner_join(communities, demo.income, by = c("community" = "Name")) %>%
 dev.off()
 
 # Probanility two residents chosen at random will belong to different family income levels
-png("img/economic_diversity.png", width=6.5, height=9, units="in", res=144)
+png("../img/economic_diversity.png", width = 6.5, height = 6.5, units ="in", res=144)
 inner_join(communities, demo.income, by = c("community" = "Name")) %>%
   ggplot() +
   geom_sf(aes(fill = EDX_2014.2018)) +

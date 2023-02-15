@@ -27,6 +27,8 @@ Businesses were classified based on the most severe outcome from historical insp
 
 The partitioning tree analysis identified pest control practices (violation 18) as a key differentiator among inspection outcomes. Topic modeling on specific violations text, identifying common phrases used in the observation for a violation was performed.  The terms appearing between 10% and 95% of observations were grouped into four categories.  Key terms for rodent and insect populations were identified and used to identify inspection subsets for comparison with weather conditions.   
 
+## Packages and Files
+
 The [codebase](https://github.com/Marmuvar/NoRats/tree/main/src) contains the following files:
 | File | Description |
 | -- | -- |
@@ -35,33 +37,31 @@ The [codebase](https://github.com/Marmuvar/NoRats/tree/main/src) contains the fo
 | CARTModel.rmd | Analysis of inspection frequency |
 | PestStudy.rmd | Textual and weather related analysis of rat and bug violations |
 
-## Packages and Files
-
 ## Results
 
 ### Demographics and Business Characterization
 
-Chicago's 77 community areas exhibit significant diversity in racial and socioeconomic status (figures 1 and 2).  However, over 30% of businesses were located in just four communities (Near North Side, Loop, Near West Side, and Lake View) (figure 3). Although the frequency of failed inspections appeared to differ on a community basis (figure 4), most failures clustered in the areas with high business populations (figure 5). Considering both the high population and per capita income in these areas, it seemed that there would be insufficient variation in the demographic data among inspections to merit further analysis.  For these reasons, we designed the investigation to focus on the text of the inspections and the observed deficiencies.    
+Chicago's 77 community areas exhibit significant diversity in racial and socioeconomic status (figures 1 to 3 ).  However, over 30% of businesses were located in just four communities (Near North Side, Loop, Near West Side, and Lake View) (figure 4). Although the frequency of failed inspections appeared to differ on a community basis (figure 5), most failures clustered in the areas with high business populations (figure 6). Considering both the high population and per capita income in these areas, it seemed that there would be insufficient variation in the demographic data among inspections to merit further analysis.  For these reasons, we designed the investigation to focus on the text of the inspections and the observed deficiencies.    
 
-![Businesses per Community](img/biz_ct_map.png) 
+![Population per Community](img/demo_pop.png "Figure 1") 
 
-![Population per Community](img/demo_pop.png) 
+![Median Income per Community](img/median_income.png "Figure 2") 
 
-![Median Income per Community](img/median_income.png) 
+![Economic Diversity](img/economic_diversity.png "Figure 3") 
 
-![Economic Diversity](img/economic_diversity.png) 
+![Businesses per Community](img/biz_ct_map.png "Figure 4") 
 
-![Fail_Inspect](img/insp_fail_vs_cmty.png) 
+![Fail_Inspect](img/insp_fail_vs_cmty.png "Figure 5") 
 
-![Fail_Inspect_w_Community](img/biz_fail_map.png) 
+![Fail_Inspect_w_Community](img/biz_fail_map.png "Figure 6") 
 
 ### Predicting Inspection Outcomes
 
 We next used a classification and regression tree (CART) to understand which violations could be strong indicators of the result of an inspection. The model indicated that four violations (18 - Pests, 3 - Food Temperature, 21 - Certified Food Manager, and 29 - Corrected Previous Violation) differentiated the inspection outcomes.   
 
-![CART 1](img/model_cart1_chart.png)
+![CART 1](img/model_cart1_chart.png "Figure 7")
 
-Using a 80-20 Train/Test split, we find the following predictions on the t  est set:
+Using a 80-20 Train/Test split, we find the following predictions on the test set:
 
 | Prediction / Actual | Pass | Pass with Conditions | Fail |
 | -- | -- | -- | -- |
@@ -79,7 +79,7 @@ In a second CART model, we looked at how frequency of violations being documente
 
 * Passes: Restaurants which have always passed.  
 
-![CART 2](img/model_cart2_chart.png)
+![CART 2](img/model_cart2_chart.png "Figure 8")
 
 The values on the branches correspond with the proportion of inspections where a restaurant has received a specific violation.  We can also see that having a low frequency for Violation 18, Violation 29, Violation 21, and Violation 3 is a strong, but not perfect, indicator that a restaurant will always pass inspections.  In this model, we see that Violation 18 is again the most prominent reason for failing an inspection.  When a restaurant has had more than 0.3% of their inspections having received Violation 18, they can expect to have failed at least one inspection.  We can also see the importance of Violation 29 in studying repeated inspections. Correcting previous violations is important to passing.
 
@@ -96,9 +96,9 @@ This model demonstrates a 100% sensitivity and 90% specificity for Passes.  For 
 
 ### Model Characteristics
 
-The CART model differentiated businesses using the presence of only 5 violation types, which we refer to as “key violations”.  In the CART model, the key violations provided the strongest indication over the result of a restaurant inspection.   While the key violations comprised less than 10% of the total observed violations (table 3, figure 8), they provided an effective tool for differentiating the inspection patterns of businesses that had always passed their inspections from those that had conditionally passed or failed their inspections. 
+The CART model differentiated businesses using the presence of only 5 violation types, which we refer to as “key violations”.  In the CART model, the key violations provided the strongest indication over the result of a restaurant inspection.   While the key violations comprised less than 10% of the total observed violations (table 3, figure 9), they provided an effective tool for differentiating the inspection patterns of businesses that had always passed their inspections from those that had conditionally passed or failed their inspections. 
 
-To understand the violation selection, the proportion of each inspection outcome for each violation was calculated (figure 9).   Interestingly, violations that appeared more frequently in businesses with passing results (e.g. 30-45)  did not have a classification benefit.  Also, violation 0 (no observations) was unused despite its presence favoring passing inspections.   
+To understand the violation selection, the proportion of each inspection outcome for each violation was calculated (figure 10).   Interestingly, violations that appeared more frequently in businesses with passing results (e.g. 30-45)  did not have a classification benefit.  Also, violation 0 (no observations) was unused despite its presence favoring passing inspections.   
 
 | Violation Number | Description |Frequency Observed in Failure |
 | -- | -- | -- |
@@ -108,40 +108,39 @@ To understand the violation selection, the proportion of each inspection outcome
 | 24 | Dish washing facilities properly designed, constructed, maintained, installed, located, and operated. | 0.5 |
 | 29 | Previous minor violation(s) corrected. | 1.2 |
 
-![Viol_pct](img/viol_pct_as_key.png)
+![Viol_pct](img/viol_pct_as_key.png "Figure 9")
 
-![Viol_net](img/key_viol_pct_w_class.png)
+![Viol_net](img/key_viol_pct_w_class.png "Figure 10")
 
 As indicated by both CART models, the violation which is most frequently associated with not passing an inspection is Violation 18.  Within this violation, we find there are several main reasons for why a restaurant receives this violation: rodents, insects, logs, and seals.
 
 The locations and kitchen appliances typically refer to locations where evidence of vermin are found. There are also frequent references to logs or logbooks, which are required by restaurants to keep records of visits by pest control companies (which should be done twice a year), descriptions on application of pesticides, and recommended corrective actions by the pest control company. Finally, there sure be sufficient barriers to discourage entrance by pest, such as including screens over windows, self-closing doors, and forms of rat-proofing.
 
-Based on the wordcloud, the observations accompanying the violations were further filtered into two categories.  Inspections observing rodents (words “mice”, “mouse”, “rat” “rodent”) or insects (words “fly”, “flies”, “roach”, “insect”, “bug”, “gnat”) were counted.  The percentage of all inspections observing rodents or insects was charted for each month, irrespective of year.  While rodent observations were constant throughout the year (figure 11), insect observations increased in the summer and the fall (figure 12).  
+A detailed observation accompanies each citation.  Therefore, textual analysis could produce clusters of common deficiencies noted for each violatio.  Based on the wordcloud, the observations accompanying the violations were further filtered into two categories.  Inspections observing rodents (words “mice”, “mouse”, “rat” “rodent”) or insects (words “fly”, “flies”, “roach”, “insect”, “bug”, “gnat”) were counted.  The percentage of all inspections observing rodents or insects was charted for each month, irrespective of year.  While rodent observations were constant throughout the year (figure 12), insect observations increased in the summer and the fall (figure 12).  
 
-![Viol_18](img/vermin_cloud.png) 
+![Viol_18](img/vermin_cloud.png "Figure 11") 
 
 The percent of observations for Violation 18 that mention rodents (rats, mice, mouse) out of all inspections was computed for each month (figure 11).  Here, we see that the observation of rodents is consistent from February to July before showing some increase through September and potential decline through January.  More investigation is needed to determine if this seasonality is significant or reflective of overall variance in the data set.   
 
-![rat_month](img/rodent_month_bar.png)
+![rat_month](img/rodent_month_bar.png "Figure 12")
 
 In Figure 12, we examine the monthly percent of violations mentioning insects out of all inspections in a given month.  Here, we see that the percentage of Violation 18 observations which mention insects (including roaches, flies, and gnats) increases strongly in the summer and early fall months.
 
-![bug_month](img/insect_month_bar.png)
+![bug_month](img/insect_month_bar.png "Figure 13")
 
 Another reason for receiving Violation 18 is related to improper log books.  The terms “log” and “logbook” were identified in the document cloud as a frequent term in the observations for Violation 18.  A restaurant is required to keep this logbook up to date with records of required biannual pest control visits and records of pest control measures implemented, among other details. Further analysis will be needed to identify the most common flaws with the log books.
 
 Inspection history was joined with daily weather patterns for minimum temperature.  Minimum temperatures were broken into four bands.  The percentage of inspections occurring on each day with insect observations was reported based on the temperature band.  As expected from the monthly data, a lower percentage of inspections observed insects on days in lower minimum temperature bands.  This suggests that the minimum temperature variable could be useful for development of a regression or classification model in future studies.
 
-![Bug_temp](img/insect_by_temp_box.png)
+![Bug_temp](img/insect_by_temp_box.png "Figure 14")
 
 ## Future Investigations  
 
 The current investigation focussed on for-cause and routine canvassing inspections. However, the study did not consider business licensing inspections, facility reinspection, and consultations, which represented around 85,000 additional inspections.  While these categories appear sufficiently different from the studied types, a similar approach may be applicable in understanding a relationship among these groups.  
 
-For future data cleaning, several known deficiencies were identified in the data set.  First, because unique businesses were identified using the establishment’s license number and `AKA Name`, the omission of license numbers in some records created a unique establishment.  This could be resolved by incorporating business addresses.  Next, there were approximately 600 inspections without a GPS location associated with them.  With access to a geotagging tool, the Longitude-Latitude can be recovered from the address on the license.  These records were not used because of the inability to link them to specific community areas.
+For future data cleaning, several known deficiencies were identified in the data set.  First, because unique businesses were identified using the establishment’s license number and "AKA Name"", the omission of license numbers in some records created a unique establishment.  This could be resolved by incorporating business addresses.  Next, there were approximately 600 inspections without a GPS location associated with them.  With access to a geotagging tool, the Longitude-Latitude can be recovered from the address on the license.  These records were not used because of the inability to link them to specific community areas.
 
 Last, the investigation considered only restaurants.  However, because the inspection database contains grocery stores, mobile vendors, and other institutions, it may be of interest to further study if the model could be directly applied to inspections for these establishments. 
-
 
 ## Conclusion  
 

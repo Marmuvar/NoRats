@@ -53,7 +53,7 @@ data_cols <- cols(
      Longitude = col_double(),
      Location = col_character()
 )
-raw.data <- read_csv("food-inspections.csv", col_types = data_cols)
+raw.data <- read_csv("../data/food-inspections.csv", col_types = data_cols)
 ```
 
 ## Communities
@@ -63,10 +63,10 @@ Chicago has community Areas and Neighborhoods. community areas have demographic 
 Shape files from [here](https://data.cityofchicago.org/Facilities-Geographic-Boundaries/Boundaries-Neighborhoods/bbvz-uum9).
 
 ```{r Importing-Maps}
-nbhd <- read_sf("ChicagoNbhd/geo_export_8956960c-bd3c-4e92-a8b2-4748382c28a3.shp")  %>%
+nbhd <- read_sf("../data/ChicagoNbhd/geo_export_8956960c-bd3c-4e92-a8b2-4748382c28a3.shp")  %>%
      sf::st_transform('+proj=longlat +datum=WGS84')
 
-communities <- read_sf("ChicagoCommunities/geo_export_55b54106-a17e-4776-86c9-12db49043238.shp")  %>%
+communities <- read_sf("../data/ChicagoCommunities/geo_export_55b54106-a17e-4776-86c9-12db49043238.shp")  %>%
      sf::st_transform('+proj=longlat +datum=WGS84')
 ```
 
@@ -118,14 +118,14 @@ demographics_columns <- cols(
      `Juvenile` = col_double()
 )
 
-demographics.info <- read_csv("Demographics/CHADDemographics.csv", 
+demographics.info <- read_csv("../data/Demographics/CHADDemographics.csv", 
                               col_names = demographic_names, 
                               skip = 1, 
                               n_max = 2,
                               show_col_types = FALSE) %>%
      dplyr::select('Male':'Juvenile')
 
-demographics <- read_csv("Demographics/CHADDemographics.csv",
+demographics <- read_csv("../data/Demographics/CHADDemographics.csv",
                          col_names = demographic_names, 
                          col_types = demographics_columns,
                          skip = 5
@@ -161,16 +161,16 @@ communities.demographics <- merge(communities,
 
 
 ```{r other_demographics, eval=TRUE, include=TRUE}
-demo.traf.vac <- read.csv("Demographics/Chicago_traffic_and_Vacant.csv") %>%
+demo.traf.vac <- read.csv("../data/Demographics/Chicago_traffic_and_Vacant.csv") %>%
      mutate(Name=str_to_upper(Name))
 
-demo.income <- read.csv("Demographics/Chicago_income.csv") %>% 
+demo.income <- read.csv("../data/Demographics/Chicago_income.csv") %>% 
      mutate(Name=str_to_upper(Name))
 
-demo.lang.birth <- read.csv("Demographics/Chicago_lang_and_birth.csv") %>%
+demo.lang.birth <- read.csv("../data/Demographics/Chicago_lang_and_birth.csv") %>%
      mutate(Name=str_to_upper(Name))
 
-demo.population <- read.csv("Demographics/Chicago_pop.csv") %>% 
+demo.population <- read.csv("../data/Demographics/Chicago_pop.csv") %>% 
      mutate(Name=str_to_upper(Name))
 ```
 
@@ -303,8 +303,8 @@ inspections <- inspections %>%
           (`License #` %in% with.complaint) | (`License #` %in% no.complaints)
      ) %>%
      mutate(Has_for_Cause = case_when(
-          `License #` %in% with.complaint         ~ TRUE,
-          `License #` %in% no.complaints          ~ FALSE
+          `License #` %in% with.complaint ~ TRUE,
+          `License #` %in% no.complaints ~ FALSE
      ))
 
 enough.canvass <- inspections %>%
@@ -326,38 +326,6 @@ pass.fail.inspections <- inspections %>%
 
 pass.fail.inspections <- pass.fail.inspections %>%
      mutate(Results = factor(Results, levels = c("Pass", "Pass w/ Conditions", "Fail")))
-
-```
-```{r demo_graphs, fig.width=12, fig.height=12}
-
-#function for lengthening demographic info and tidy map plots.
-
-#pre: data is defined tibble containing a community in Name and data in value
-#pre: community is defined and contains an SF geometry and community name in community
-#pre: demo_col is user_defined text string and is contained in data
-#post: outputs a ggplot map of region with fill based on data value.  
-
-
-demo_plot<-function(data, demo_col, mainTitle=""){
-     data%>%
-          dplyr::select(Name, starts_with(demo_col))%>%
-          pivot_longer( 
-               cols= starts_with(demo_col), 
-               names_to= "demo_year")%>%
-          inner_join(communities, by=c("Name"="community"))%>%
-          st_as_sf()%>%
-          ggplot()+
-          geom_sf(aes(fill=value, geometry=geometry))+
-          #facet_wrap(vars(demo_year))+
-          labs(title=mainTitle)+
-          scale_fill_viridis_c(option="C")
-}
-
-png("graphics/demo_pop.png", width=6.5, height=9, units="in", res=144)
-demo_plot(demo.population,"POP_2014", "Community Population, 2014-2018")
-png("graphics/PC_Income.png", width=6.5, height=9, units="in", res=144)
-demo_plot(demo.income, "PCI_2014", "Per Capita Income, 2014-2018")
-dev.off()
 
 ```
 ## Violations Per Inspection
@@ -478,7 +446,7 @@ vio_pct_as_key.plot <- violations%>%
           x="Percent Observed")
 vio_pct_as_key.plot
 
-png("graphics/viol_pct_as_key.png", width=6.5, height=9, units="in", res=144)
+png("../img/viol_pct_as_key.png", width = 6.5, height = 8, units="in", res=144)
 vio_pct_as_key.plot
 dev.off()
 ```
@@ -500,7 +468,7 @@ viol_pct_prsnt.plot <- violations%>%
 
 viol_pct_prsnt.plot
 
-png("graphics/viol_pct_prsnt.png", width=9, height=6.5, units="in", res=144)
+png("../img/viol_pct_prsnt.png", width = 9, height = 6.5, units="in", res=144)
 viol_pct_prsnt.plot
 dev.off()
 ```
@@ -532,7 +500,7 @@ key_viol_pct.plot <- violations%>%
           x="Percent Observed")
 key_viol_pct.plot
 
-png("graphics/key_viol_pct.png", width=6.5, height=9, units="in", res=144)
+png("../img/key_viol_pct.png", width=6.5, height=6.5, units="in", res=144)
 key_viol_pct.plot
 dev.off()
 ```
@@ -563,7 +531,7 @@ key_viol_pct_prsnt.plot <- violations%>%
           x="Violation Number", 
           y="Percent Observed")
 key_viol_pct_prsnt.plot
-png("graphics/key_viol_pct_prsnt.png", width=9, height=6.5, units="in", res=144)
+png("../img/key_viol_pct_prsnt.png", width=9, height=6.5, units="in", res=144)
 key_viol_pct_prsnt.plot
 dev.off()
 ```
@@ -609,14 +577,14 @@ key_viol_pct_w_class.plot <- ggplot(data = key_viol_pct_w_class.data)+
       theme(legend.position = ("bottom"))
 key_viol_pct_w_class.plot
 
-png("graphics/key_viol_pct_w_class.png", width=6.5, height=9, units="in", res=144)
+png("../img/key_viol_pct_w_class.png", width = 6.5, height = 7.5, units="in", res=144)
 key_viol_pct_w_class.plot
 dev.off()
 ```
 
 
 ```{r}
-png("graphics/key_viol_pct_w_class_prsnt.png", width=18, height=6, units="in", res=144)
+png("../img/key_viol_pct_w_class_prsnt.png", width=18, height=6, units="in", res = 144)
 violations%>%
      dplyr::select(V_Num, `Inspection ID`)%>%
      inner_join(inspect_long)%>%
@@ -738,22 +706,22 @@ cmty_stat_plot<-function(x, x_col,mainTitle="", fCol=waiver()){
 }
 
 #Graphs...
-png("graphics/biz_ct_map.png", width=6.5, height=9, units="in", res=144)
+png("../img/biz_ct_map.png", width = 6.5, height = 6.5, units="in", res=144)
 #show businesses per community.
 cmty_stat_plot(biz_by_community,"biz.ct", "Businesses per Community", "Count")
 dev.off()
 
-png("graphics/biz_year_map.png", width=6.5, height=9, units="in", res=144)  
+png("../img/biz_year_map.png", width = 6.5, height = 6.5, units="in", res=144)  
 #show mean years in business for community.
 cmty_stat_plot(cmty_biz_yrs,"cmty.biz.yrs", "Number of Years Inspected, 2000-2018", "Years") 
 dev.off()
-png("graphics/biz_insp_per_yr.png", width=6.5, height=9, units="in", res=144)  
+png("../img/biz_insp_per_yr.png", width=6.5, height = 6.5, units="in", res=144)  
 #Show inspections per business per year
 cmty_stat_plot(inspect_rate_by_cmty, "yr.cmty.insp.rate", "Inspections per Business per Year", "Insp. per Year")
 dev.off()
 #overlay of mean violations / inspection on community business count
 #this is interesting.  Look at the higher number of violations in outer areas.
-png("graphics/biz_viol_vs_cmty.png", width=6.5, height=9, units="in", res=144)
+png("../img/biz_viol_vs_cmty.png", width = 6.5, height= 6.5, units="in", res=144)
 cmty_stat_plot(cmty_viol_per_inspect,"cmty_viol_rate", "Mean Violations per Inspection", "Mean Viol.")
 dev.off()
 
@@ -765,7 +733,7 @@ cmty_results<-inspect_long%>%
      dplyr::summarise(insp.ct=n())%>%
      mutate(insp.pct=insp.ct/sum(insp.ct)*100)
 
-png("graphics/insp_fail_vs_cmty.png", width=6.5, height=9, units="in", res=144)
+png("../img/insp_fail_vs_cmty.png", width = 6.5, height = 6.5, units="in", res=144)
 cmty_results%>%filter(Results=="Fail")%>%
      cmty_stat_plot("insp.pct", "Percent Failed Inspections by Community", "Percent Failed")
 dev.off()
@@ -775,7 +743,7 @@ dev.off()
 inspections.geo.f<-inspections.geo%>%
      filter(Results%in%c("Fail"), `Inspection Type` %in% c(canvass.inspection,complaint.inspection))
 
-png("graphics/biz_fail_map.png", width=6.5, height=9, units="in", res=144)
+png("../img/biz_fail_map.png", width = 6.5, height = 6.5, units="in", res=144)
 inner_join(demo.income,communities, by=c("Name"="community"))%>%
      st_as_sf()%>%
      ggplot()+
