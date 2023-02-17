@@ -17,15 +17,13 @@ The classification model identified several key violations, with the most import
 
 ## Methods
 
-Food health inspection records, community boundaries, and community demographics were downloaded from CDPH.
-Inspection records were limited to those performed on restaurants prior to July 1, 2018. After that date, Chicago implemented a new inspection rubric that was inconsistent with prior years. Data sets were further cleaned and merged to ensure a consistent relationship among communities, demographics, and inspection data.  
+Food health inspection records, community boundaries, and community demographics were downloaded from CDPH.  Inspection records were limited to those performed on restaurants prior to July 1, 2018. After that date, Chicago implemented a new inspection rubric that was inconsistent with prior years. Data sets were further cleaned and merged to ensure a consistent relationship among communities, demographics, and inspection data.  
 
-Inspection observations were parsed to obtain a record of violation number, its regulatory definition, and the specific observation.  
-Last, weather history for the inspection period was obtained from the National Centers for Environmental Information.  This was joined by date with inspection history.  
+Inspection observations were parsed to obtain a record of violation number, its regulatory definition, and the specific observation.  Last, weather history for the inspection period was obtained from the National Centers for Environmental Information.  This was joined by date with inspection history.  
 
 Businesses were classified based on the most severe outcome from historical inspections. These classifications ranged from businesses that had either always passed, conditionally passed, or had experienced one or more failures. Recursive partitioning and regression tree analysis was performed to model the relationship between business classification and violation history.  
 
-The partitioning tree analysis identified pest control practices (violation 18) as a key differentiator among inspection outcomes. Topic modeling on specific violations text, identifying common phrases used in the observation for a violation was performed.  The terms appearing between 10% and 95% of observations were grouped into four categories.  Key terms for rodent and insect populations were identified and used to identify inspection subsets for comparison with weather conditions.   
+A [description of violations](https://www.chicago.gov/city/en/depts/cdph/provdrs/healthy_restaurants/svcs/understand_healthcoderequirementsforfoodestablishments.html) is available from the CDPH The partitioning tree analysis identified pest control practices (violation 18) as a key differentiator among inspection outcomes. Topic modeling on specific violations text, identifying common phrases used in the observation for a violation was performed.  The terms appearing between 10% and 95% of observations were grouped into four categories.  Key terms for rodent and insect populations were identified and used to identify inspection subsets for comparison with weather conditions.   
 
 ## Packages and Files
 
